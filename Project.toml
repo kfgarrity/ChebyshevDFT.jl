@@ -1,0 +1,4 @@
+name = "ChebyshevDFT"
+uuid = "758fd55d-7a16-489d-91c5-026d66c02e0c"
+authors = ["kfgarrity <kevin.garrity@nist.gov>"]
+version = "0.1.0"

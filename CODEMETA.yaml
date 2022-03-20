@@ -73,7 +73,7 @@ themes:
   #     - Chemical engineering and processing
   #     - Chemical thermodynamics and chemical properties
   #     - Molecular characterization
-  #     - Theoretical chemistry and modeling
+       - Theoretical chemistry and modeling
   #     - Thermochemical properties
   #
   # - Electronics
@@ -269,9 +269,9 @@ themes:
   #     - Leadership development
   #
   # - Physics
-  #     - Atomic, molecular and quantum
+       - Atomic, molecular and quantum
   #     - Biological physics
-  #     - Condensed matter
+       - Condensed matter
   #     - Electron physics
   #     - Magnetics
   #     - Nuclear physics
