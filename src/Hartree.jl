@@ -34,7 +34,7 @@ function V_Ha(N, n, Rmax)
 #    VH0 = (4*pi)*pts.*wts.*n
 
     VH0 = 4*pi*QuadGK.quadgk(x->n(x)*x, 0, Rmax, atol=1e-10)[1]
-
+    println("VH0 $VH0")
     function A1(x)
         return 2.0/(x + 1e-5)
     end
@@ -70,8 +70,13 @@ function V_H2(N, n, Rmax)
 
     Ham = D2_a +  diagm( 2 ./ r_a )  * D_a 
 
+    
     B = (-4*pi)*n.(r_a)  .+ (2.0 ./ r_a ) * (VH0 / Rmax - 1.0 / Rmax^2)
 
+    println("H ", Ham[1:2,1:2])
+    println("B ", B[1])
+    println("n ", n.(r_a)[1])
+    
     C = Ham \ B
     
     println("size C ", size(C), " size r ", size(r))
@@ -82,6 +87,36 @@ function V_H2(N, n, Rmax)
     
 end
 
+
+function V_H3(rho,r,w,Ham ,Rmax, rall, nel)
+
+
+    a = 0.0
+    b = Rmax
+    
+    VH0 = 4.0*pi*sum(rho.*r.*w)
+    #VH0 = nel
+    #println("VH0 H3  $VH0")
+
+    #Ham = D2 +  diagm( 2.0 ./ r )  * D 
+
+    B = (-4.0*pi)*rho  .+ (2.0 ./ r ) * (VH0 / Rmax - nel / Rmax^2)
+
+#    println("H ", Ham[1:2,1:2])
+#    println("B ", B[1])
+#    println("rho ", rho[1])
+
+    
+    
+    C = Ham \ B
+
+    #    C = [0;C;0]  + VH0*(1 .- rall / Rmax) + rall * nel / Rmax^2
+
+    C = C  + VH0*(1 .- r / Rmax) + r * nel / Rmax^2
+    
+    return C
+    
+end
 
 
 

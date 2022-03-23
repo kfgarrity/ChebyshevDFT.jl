@@ -63,7 +63,7 @@ function v_LDA(rho)
 
     #println("lda ", rho, " ", ONE, " " , TWO)
     
-    return ONE + TWO
+    return (ONE + TWO)/2.0
     
 end
 
