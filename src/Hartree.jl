@@ -110,9 +110,9 @@ function V_H3(rho,r,w,Ham ,Rmax, rall, nel)
     
     C = Ham \ B
 
-    #    C = [0;C;0]  + VH0*(1 .- rall / Rmax) + rall * nel / Rmax^2
+    C = [0;C;0]  + VH0*(1 .- rall / Rmax) + rall * nel / Rmax^2
 
-    C = C  + VH0*(1 .- r / Rmax) + r * nel / Rmax^2
+    #C = C  + VH0*(1 .- r / Rmax) + r * nel / Rmax^2
     
     return C
     

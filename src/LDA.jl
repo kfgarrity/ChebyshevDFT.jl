@@ -19,6 +19,82 @@ function Y(y)
     
 end
 
+function f(ζ)
+    return ((1+ζ)^(4/3) + (1 - ζ)^(4/3) - 2 ) / (2 * (2^(1/3) - 1))
+end
+
+function F(rs,A,x0,b,c)
+
+    x = rs^0.5
+    X = x^2+b*x+c
+    X0 = x0^2+b*x0+c
+    Q = (4*c-b^2)^0.5
+    
+    return A*(log(x^2/X) + 2 * b / Q *atan(Q / (2*x + b)) - b * x0 / X0 * (log( (x-x0)^2 / X) + 2*(b + 2 * x0) / Q * atan(Q / (2*x+b))))
+
+    
+end
+
+function e_LDA_sp(n, ζ)
+
+#    n=rho_up+rho_dn
+    if n < 1e-100
+        return 0.0
+    end
+
+    #exchange see https://www.nist.gov/pml/atomic-reference-data-electronic-structure-calculations/atomic-reference-data-electronic-6-3
+    
+ #   ζ = (rho_up - rho_dn)/n
+#    
+    rs = (3.0/(4.0*pi*n))^(1.0/3.0)
+
+    e_x_p = -3.0 * (9.0/ (32.0*pi^2))^(1.0/3.0) * rs^(-1.0)
+    e_x_f =  e_x_p / (2.0^(-1.0/3.0))
+
+    f = ((1+ζ)^(4/3) + (1 - ζ)^(4/3) - 2 ) / (2 * (2^(1/3) - 1))
+
+#    println("f $f")
+    
+    ex =  e_x_p  + (e_x_f - e_x_p) * f
+
+    #correlation
+
+    ff2_0 = 1.709920934161365
+
+#    para = [0.0310907, -0.10498, 3.72744, 12.9352]
+#    ferro = [0.01554535, -0.32500, 7.06042, 18.0578]
+#    stiff = [-1/(6*pi^2), -0.00475840, 1.13107, 13.0045]
+
+    Ap = 0.0310907
+    xp = -0.10498
+    bp = 3.72744
+    cp = 12.9352
+
+    Af = 0.01554535
+    xf = -0.32500
+    bf = 7.06042
+    cf = 18.0578
+
+    As = -1/(6*pi^2)
+    xs = -0.00475840
+    bs = 1.13107
+    cs = 13.0045
+
+    e_c_p = F(rs, Ap,xp,bp,cp)
+    e_c_f = F(rs, Af,xf,bf,cf)
+    e_c_s = F(rs, As,xs,bs,cs)
+
+    de1 = e_c_f - e_c_p
+    
+    β = ff2_0 * de1 / e_c_s - 1
+    
+    ec = e_c_p + e_c_s * (f/ff2_0) * (1 + β * ζ^4)
+
+    #print([2*ex, 2*ec])
+    return (ex + 2.0*ec)  #2 for rydberg !?
+end
+
+
 function e_LDA(rho)
 
 #    println("rho $rho")
@@ -48,9 +124,25 @@ function e_LDA(rho)
     
     #2 for rydberg units
 
-#    println([eps_x, eps_c])
+    #println([2*eps_x, 2*eps_c])
     
     return 2*(eps_x + eps_c)
+    
+end
+
+function v_LDA_sp(rho, ζ)
+
+    rho = max(rho, 1e-100)
+    
+    ONE = e_LDA_sp(rho, ζ)
+
+    t = x -> e_LDA_sp(x, ζ)
+    
+    TWO = rho * ForwardDiff.derivative(t ,rho)
+
+    #println("lda ", rho, " ", ONE, " " , TWO)
+    
+    return (ONE + TWO)/2.0
     
 end
 

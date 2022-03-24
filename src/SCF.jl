@@ -6,6 +6,11 @@ using ChebyshevQuantum
 using Polynomials
 using SpecialPolynomials
 using ..LDA:v_LDA
+using ..LDA:e_LDA
+
+using ..LDA:v_LDA_sp
+using ..LDA:e_LDA_sp
+
 using ..Hartree:V_Ha
 using ..Hartree:V_H3
 using QuadGK
@@ -259,20 +264,23 @@ function get_initial_rho(rho_init, N, Z, nel, r, w)
                 nleft -= maxfill
             end
         end
+        rho = rho / (4*pi)
+        
     end        
     
     #check normalization
-    rho = rho / (4*pi)
     norm = 4 * pi * sum(rho .* r.^2 .* w)
+#    println("X check norm $norm")
+    rho = rho / norm * nel
+#    norm = 4 * pi * sum(rho .* r.^2 .* w)
     println("X check norm $norm")
-    #    rho = rho / norm * nel
     
     return rho
     
 end
 
 
-function DFT(; N = 40, nmax = 1, lmax = 0, Z=1.0, Rmax = 10.0, nel = missing, rho_init = missing, mix = 0.5, niters=20)
+function DFT(; N = 40, nmax = 1, lmax = 0, Z=1.0, Rmax = 10.0, nel = missing, rho_init = missing, niters=20, mix = 0.7)
 
     Z = Float64(Z)
     if ismissing(nel)
@@ -283,7 +291,8 @@ function DFT(; N = 40, nmax = 1, lmax = 0, Z=1.0, Rmax = 10.0, nel = missing, rh
         r, D, D2, w, rall,wall,H_poisson = setup_mats(;N = N, Rmax=Rmax)
         
         rho = get_initial_rho(rho_init, N, Z, nel,rall,wall)
-
+        rho_old = deepcopy(rho)
+        
         Vc = getVcoulomb(r, Z)
         KE = getKE(r)
         
@@ -293,28 +302,92 @@ function DFT(; N = 40, nmax = 1, lmax = 0, Z=1.0, Rmax = 10.0, nel = missing, rh
         
         vects = zeros(Complex{Float64}, size(H0))
         vals_r = zeros(Float64, size(H0)[1])    
+
+        VH = zeros(size(rho))
+        filling = zeros(size(rho))
+        Vtot = zeros(size(rho))
+        
     end
 
+
+    
     for iter = 1:niters
         
-        VLDA = diagm(v_LDA.(rho[2:N]))
-        VH = diagm(V_H3(rho[2:N], r,w,H_poisson,Rmax, rall, nel))
-
-        Ham[:,:] = H0 + (VH + VLDA)
+        #        VLDA = diagm(v_LDA.(rho[2:N]))
+        VLDA = diagm(v_LDA_sp.(rho[2:N], 1.0))
+        println("max vlda", maximum(VLDA))
+        VH[:] = V_H3(rho[2:N], r,w,H_poisson,Rmax, rall, nel)
+        VH_mat = diagm(VH[2:N])
+        Vtot = VH[2:N] + diag(VLDA) + diag(Vc)
+        
+        
+        Ham[:,:] = H0 + (VH_mat + VLDA)
 
         vals, vects = eigen(Ham)
         vals_r = real.(vals)
         println("$iter vals ", vals_r[1:4])
         
-        rho = assemble_rho(vals_r, vects, nel, r, w, rho, N)
-        
+        rho, filling = assemble_rho(vals_r, vects, nel, rall, wall, rho, N, Rmax)
+        if iter > 1
+            rho[:] = mix*rho[:] + (1.0-mix)*rho_old[:]
+        end
+        rho_old[:] = rho[:]
     end
 
-    return vals_r, vects, rho,r
+    energy = calc_energy(rho, N, Rmax, rall, wall, VH, filling, vals_r, Vtot, Z)
+    
+    return vals_r, vects, rho,rall
     
 end    
 
-function assemble_rho(vals_r, vects, nel, r, w, rho, N)
+function calc_energy(rho, N, Rmax, rall, wall, VH, filling, vals_r, Vin, Z)
+
+    ELDA = calc_energy_lda(rho, N, Rmax, rall, wall)
+    EH = calc_energy_hartree(rho, N, Rmax, rall, wall, VH)
+    KE = calc_energy_ke(rho, N, Rmax, rall, wall, filling, vals_r, Vin)
+    ENUC = calc_energy_enuc(rho, N, Rmax, rall, wall,Z)
+
+    println()
+    println("ELDA   $ELDA")
+    println("EH     $EH")
+    println("KE     $KE")
+    println("ENUC   $ENUC")
+
+    ENERGY = ELDA + EH + KE + ENUC
+    println()
+    println("ENERGY $ENERGY ")
+    println()
+    
+end
+
+function calc_energy_enuc(rho, N, Rmax, rall, wall, Z)
+
+    return -Z * 4 * pi * sum(rho .* wall .* rall)
+
+end
+
+function calc_energy_ke(rho, N, Rmax, rall, wall, filling, vals_r, Vin)
+
+    KE = sum(filling .* vals_r)
+    KE += -4.0 * pi * sum( Vin .* rho[2:end-1] .* rall[2:end-1].^2 .* wall[2:end-1])
+
+    return KE
+    
+end
+
+function calc_energy_lda(rho, N, Rmax, rall, wall)
+
+    return 4 * pi * 0.5 * sum( e_LDA_sp.(rho, 1.0) .* rho .* wall .* rall.^2 )  #hartree
+
+end
+
+function calc_energy_hartree(rho, N, Rmax, rall, wall, VH)
+
+    return 0.5 * 4 * pi * sum(VH .* rho .* wall .* rall.^2 )
+    
+end
+
+function assemble_rho(vals_r, vects, nel, rall, wall, rho, N, Rmax)
 
     inds = sortperm(vals_r)
     nleft = nel
@@ -322,25 +395,44 @@ function assemble_rho(vals_r, vects, nel, r, w, rho, N)
 
 #    println(size(rho))
 #    println(size(vects))
+
+#    t = zeros(N+1)
+    vnorm = zeros(N+1)
+
+    eps =  rall[2]/5.0
+
+    filling = zeros(size(vals_r))
     
     for i in inds
-        vnorm = real.(vects[:,i].*conj(vects[:,i])) ./ r.^2
-        vnorm = vnorm / (4.0*pi*sum(vnorm .* w .* r.^2))
-        if nleft <= 2.0 + 1e-10
 
-            rho[2:N] += vnorm * nleft
+        vnorm[:] = [0; real.(vects[:,i].*conj(vects[:,i])); 0]
+        t_cheb = ChebyshevQuantum.Interp.make_cheb(vnorm, a=0.0, b = Rmax)
+        vnorm[1] = t_cheb(eps)/(eps)^2
+        vnorm[2:N] = vnorm[2:N] ./ rall[2:N].^2
+
+        #limit
+        
+#        vnorm[:] = [t_cheb(1e-5)/(1e-5)^2;  real.(vects[:,i].*conj(vects[:,i])) ./ r.^2; 0.0]
+
+        vnorm = vnorm / (4.0*pi*sum(vnorm .* wall .* rall.^2))
+
+        if nleft <= 2.0 + 1e-10
+            rho += vnorm * nleft
+            filling[i] = nleft
             break
         else
 
-            rho[2:N] += vnorm * 2.0
+            rho += vnorm * 2.0
             nleft -= 2.0
+            filling[i] = 2.0
+            
         end
     end    
 
-    norm = 4.0*pi*sum(rho[2:N] .* w .* r.^2)
+    norm = 4.0*pi*sum(rho .* wall .* rall.^2)
 #    println("check norm ", norm)
     rho = rho/ norm * nel
-    return rho
+    return rho, filling
     
 end
 
