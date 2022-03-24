@@ -130,19 +130,31 @@ function e_LDA(rho)
     
 end
 
-function v_LDA_sp(rho, ζ)
+function v_LDA_sp(rho_up, rho_dn)
 
-    rho = max(rho, 1e-100)
-    
-    ONE = e_LDA_sp(rho, ζ)
+        
+    function eup(x)
 
-    t = x -> e_LDA_sp(x, ζ)
+        rhot = max(x+rho_dn, 1e-100)
+        ζ = (x - rho_dn)/rhot
+
+        return rhot*e_LDA_sp(rhot, ζ) / 2.0
+    end
+
+    function edn(x)
+
+        rhot = max(rho_up+x, 1e-100)
+        ζ = (rho_up - x)/rhot
+
+        return rhot*e_LDA_sp(rhot, ζ) / 2.0
+    end
     
-    TWO = rho * ForwardDiff.derivative(t ,rho)
+    vup = ForwardDiff.derivative(eup ,rho_up)
+    vdn = ForwardDiff.derivative(edn ,rho_dn)
 
     #println("lda ", rho, " ", ONE, " " , TWO)
-    
-    return (ONE + TWO)/2.0
+
+    return [vup, vdn]
     
 end
 

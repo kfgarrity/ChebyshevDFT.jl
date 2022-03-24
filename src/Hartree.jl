@@ -90,7 +90,6 @@ end
 
 function V_H3(rho,r,w,Ham ,Rmax, rall, nel)
 
-
     a = 0.0
     b = Rmax
     
