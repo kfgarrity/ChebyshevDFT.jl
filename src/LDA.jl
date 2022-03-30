@@ -38,7 +38,7 @@ end
 function e_LDA_sp(n, ζ)
 
 #    n=rho_up+rho_dn
-    if n < 1e-100
+    if n < 1e-60
         return 0.0
     end
 
