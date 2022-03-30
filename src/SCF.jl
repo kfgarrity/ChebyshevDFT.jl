@@ -1,6 +1,6 @@
 module SCF
 
-
+using ForwardDiff
 using LinearAlgebra
 using ChebyshevQuantum
 using Polynomials
@@ -143,8 +143,8 @@ function hydrogen6(; N = 40, l = 0, Z=1.0, Rmax = 10.0)
     return vals, vects
 end
 
-function setup_mats(;N = N, Rmax=Rmax)
-    a = 0.0
+function setup_mats(;N = N, a = 0.0, Rmax=Rmax)
+
     b = Rmax
     
     pts = ChebyshevQuantum.Interp.getCpts(N);
@@ -157,6 +157,7 @@ function setup_mats(;N = N, Rmax=Rmax)
     D_a = D[2:N, 2:N]
     D2_a = D2[2:N,2:N]
     D2X = D2
+    D1X = D
 
     w, pts2 = ChebyshevQuantum.Interp.getW(N)
 
@@ -164,7 +165,7 @@ function setup_mats(;N = N, Rmax=Rmax)
 
     H_poisson = D2_a +  diagm( 2.0 ./ r_a )  * D_a
     
-    return r_a, D_a, D2_a, w_a, r, w *(b - a)/2.0, H_poisson, D2X
+    return r_a, D_a, D2_a, w_a, r, w *(b - a)/2.0, H_poisson, D1X, D2X
 
     
 end
@@ -222,8 +223,12 @@ function h_rad(n, l;Z=1.0)
     
 end
 
-function get_initial_rho(rho_init, N, Z, nel, r, w; nspin=1, checknorm=true)
+function get_initial_rho(rho_init, N, Z, nel, r, w; nspin=1, checknorm=true, ig1=missing)
 
+    if ismissing(ig1)
+        ig1 = ones(size(r))
+    end
+    
     
     if !ismissing(rho_init)
         if typeof(rho_init) <: Array
@@ -272,7 +277,7 @@ function get_initial_rho(rho_init, N, Z, nel, r, w; nspin=1, checknorm=true)
                 elseif l == 3
                     maxfill = 14/ nspin
                 end
-                println("fill $n $l $maxfill")
+#                println("fill $n $l $maxfill")
                 psi = h_rad(n, l;Z=Z)
                     if nleft <= maxfill + 1e-15
                         #                    println("size rho $(size(rho)) r $(size(r)) psir $(size(psi.(r))) ")
@@ -290,10 +295,12 @@ function get_initial_rho(rho_init, N, Z, nel, r, w; nspin=1, checknorm=true)
     if checknorm
         #check normalization
         for spin = 1:nspin
-            norm = 4 * pi * sum(rho[:,spin] .* r.^2 .* w)
-            println("spin=$spin INITIAL check norm $norm")
+            norm = 4 * pi * sum(rho[:,spin] .* r.^2 .* w .* ig1)
+            if abs(norm - sum(nel[:,spin])) > 1e-2
+                println("spin=$spin INITIAL rho check norm $norm, we renormalize")
+            end
             rho[:,spin] = rho[:,spin] / norm * sum(nel[:,spin])
-            println("spin=$spin POST-INITIAL check norm ",  4 * pi * sum(rho[:,spin] .* r.^2 .* w) )
+#            println("spin=$spin POST-INITIAL check norm ",  4 * pi * sum(rho[:,spin] .* r.^2 .* w .* ig1) )
             
         end
     end
@@ -370,11 +377,16 @@ function DFT(; N = 40, nmax = 1, lmax = 0, Z=1.0, Rmax = 10.0, nel = missing, rh
     
 end    
 
-function calc_energy(rho, N, Rmax, rall, wall, VH, filling, vals_r, Vin, Z; nspin=1, lmax=0)
+function calc_energy(rho, N, Rmax, rall, wall, VH, filling, vals_r, Vin, Z; nspin=1, lmax=0, ig1=missing)
 
+    if ismissing(ig1)
+        ig1 = ones(size(rall))
+    end
+    wall = wall .* ig1
+    
     rho_tot = sum(rho, dims=2)
     
-    ELDA = calc_energy_lda(rho, N, Rmax, rall, wall, nspin=nspin)
+    ELDA = calc_energy_lda(rho, N, Rmax, rall, wall,  nspin=nspin)
 
 #    ELDA_old = calc_energy_lda(rho_tot, N, Rmax, rall, wall, nspin=1)
     
@@ -449,7 +461,7 @@ function calc_energy_lda(rho, N, Rmax, rall, wall; nspin=1)
 
     if nspin == 1
 #        println("old ", e_LDA.(rho[end]))
-        return 4 * pi * 0.5 * sum( e_LDA.(rho) .* rho .* wall .* rall.^2 )  #hartree
+        return 4 * pi * 0.5 * sum( e_LDA.(rho) .* rho .* wall .* rall.^2  )  #hartree
 
         
     elseif nspin == 2
@@ -468,10 +480,14 @@ function calc_energy_hartree(rho, N, Rmax, rall, wall, VH)
     
 end
 
-function assemble_rho(vals_r, vects, nel, rall, wall, rho, N, Rmax, D2; nspin=1, lmax=0)
+function assemble_rho(vals_r, vects, nel, rall, wall, rho, N, Rmax, D2; nspin=1, lmax=0, ig1=missing)
 
     rho[:] .= 0.0
 
+    if ismissing(ig1)
+        ig1= ones(size(rall))
+    end
+    
     #CV = ChebyshevQuantum.Interp.make_cheb([0; real.(vects[:,1,1,1]); 0], a= 0, b = Rmax);
     #nn = sum(CV*CV)*4*pi
 
@@ -521,7 +537,7 @@ function assemble_rho(vals_r, vects, nel, rall, wall, rho, N, Rmax, D2; nspin=1,
                 
                 #        vnorm[:] = [t_cheb(1e-5)/(1e-5)^2;  real.(vects[:,i].*conj(vects[:,i])) ./ r.^2; 0.0]
                 
-                vnorm = vnorm / (4.0*pi*sum(vnorm .* wall ))# .* rall.^2))
+                vnorm = vnorm / (4.0*pi*sum(vnorm .* wall .* ig1))# .* rall.^2))
 
  #               println("vnorm ", vnorm[1:3])
 
@@ -541,7 +557,7 @@ function assemble_rho(vals_r, vects, nel, rall, wall, rho, N, Rmax, D2; nspin=1,
                 end
             end
         end
-        norm = 4.0*pi*sum(rho[:,spin] .* wall ) #.* rall.^2
+        norm = 4.0*pi*sum(rho[:,spin] .* wall .*ig1 ) #.* rall.^2
 #        println("check norm spin $spin ", norm)
         rhor2[:,spin] = rho[:,spin] /norm*sum(nel[:,spin])
         #        println("rall 1:3 ", rall[1:3])
@@ -615,7 +631,7 @@ function assemble_rho2(vals_r, vects, nel, rall, wall, rho, N, Rmax, NC, rallC, 
                 
                 #        vnorm[:] = [t_cheb(1e-5)/(1e-5)^2;  real.(vects[:,i].*conj(vects[:,i])) ./ r.^2; 0.0]
                 
-                vnorm = vnorm / (4.0*pi*sum(vnorm .* wallC .* rallC.^2))
+                vnorm = vnorm / (4.0*pi*sum(vnorm .* wallC .* rallC.^2 ))
                 
                 if nleft <= fillval/nspin + 1e-10
                     rho_big[:,spin] += vnorm * nleft
@@ -833,7 +849,7 @@ function DFT_spin_l(nel; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init = missin
 
     println("setup")
     @time begin
-        r, D, D2, w, rall,wall,H_poisson, D2X = setup_mats(;N = N, Rmax=Rmax)
+        r, D, D2, w, rall,wall,H_poisson, D1X, D2X = setup_mats(;N = N, Rmax=Rmax)
         
         rho = get_initial_rho(rho_init, N, Z, nel,rall,wall, nspin=nspin)
         #        println("rho_ini ", size(rho))
@@ -890,6 +906,8 @@ function DFT_spin_l(nel; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init = missin
             VH[:] = V_H3( rho_tot[2:N], r,w,H_poisson,Rmax, rall, sum(nel))
             VH_mat = diagm(VH[2:N])
         end
+
+        #        return VLDA[:,1], VH, rall
         
         println("eig")
         @time for spin = 1:nspin
@@ -1170,6 +1188,251 @@ function DFT_spin_l2(nel; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init = missi
     return energyNEW, vals_r, vects, rho,rall, wall, rho2, rallA, energyNEW
     
 end    
+
+####################
+
+function DFT_spin_l_grid(nel; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init = missing, niters=20, mix = 1.0, mixing_mode=:pulay, ax = 0.02)
+
+    Z = Float64(Z)
+    nel = Float64.(nel)
+    
+    if length(size(nel)) == 1
+        nspin = 1
+    else
+        nspin = size(nel)[2]
+    end
+    
+    lmax = size(nel)[1] - 1
+    println()
+    println("Running Z= $Z with nspin= $nspin lmax= $lmax Nel=", sum(nel))
+    println()
+
+#    println("setup")
+
+
+    
+    function grid(x)
+        return log(x + ax)
+    end
+
+    function grid1(x)
+        return 1.0/(x+ax)
+    end
+    function grid2(x)
+        return -1.0 / (x+ax)^2
+    end
+
+    
+#    function grid1(x)
+#        return ForwardDiff.derivative(grid, x)
+#    end
+#    function grid2(x)
+#        return ForwardDiff.derivative(grid1,x)
+#    end
+    
+    function invgrid(x)
+        return exp(x) - ax
+    end
+
+    function invgrid1(x)
+        return grid1(x).^-1
+    end
+
+    
+#=    println("grid check ", grid(invgrid(1.0)), " " , 1.0)
+    println("grid check ", grid(invgrid(0.0)), " " , 0.0)
+    println("grid check ", invgrid(grid(1.0)), " " , 1.0)
+    println("grid check ", invgrid(grid(0.0)), " " , 0.0)
+
+    println("grid check ", grid(invgrid(1.1)), " " , 1.1)
+    println("grid check ", invgrid(grid(1.1)), " " , 1.1)
+
+    println("grid1 check ", grid1(1.1), " " , grid1a(1.1))
+    println("grid2 check ", grid2(1.1), " " , grid2a(1.1))
+=#
+
+    
+    begin
+        r, D, D2, w, rall,wall,H_poisson, D1X, D2X = setup_mats(;N = N, a=grid(0.0), Rmax=grid(Rmax))
+
+
+        
+#        r, D, D2, w, rall_orig,wall,H_poisson, D2X = setup_mats(;N = N, a=0.0, Rmax=Rmax)
+#
+#        println(rall[1], " " , rall_orig[1], " ", invgrid(rall[1]))
+#        
+        rall_rs = invgrid.(rall)
+
+        ig1 = invgrid1.(rall_rs)
+
+        H_poisson = diagm(grid1.(rall_rs[2:N]).^2)*D2 + diagm(grid2.(rall_rs[2:N])) *D +  diagm( 2.0 ./ rall_rs[2:N] )*diagm(grid1.(rall_rs[2:N]))  * D
+        D2grid = ( diagm(grid1.(rall_rs[2:N]).^2)*D2 + diagm(grid2.(rall_rs[2:N])) *D  )
+        D2Xgrid = ( diagm(grid1.(rall_rs).^2)*D2X + diagm(grid2.(rall_rs)) *D1X  )
+
+        
+#        return rall_orig, rall2
+        
+        rho = get_initial_rho(rho_init, N, Z, nel,rall_rs,wall, nspin=nspin, ig1=ig1)
+        #        println("rho_ini ", size(rho))
+
+#        return rho
+        
+        rho_old = deepcopy(rho)
+#        rho_veryold = deepcopy(rho)
+
+        n1in = deepcopy(rho)
+        n1out = deepcopy(rho)
+        n2in = deepcopy(rho)
+        n2out = deepcopy(rho)
+        
+        rhor2 = zeros(size(rho))
+
+#        KE = getKE(r)
+
+        H0_L = []
+
+        
+        for l = 0:lmax
+            Vc = getVcoulomb(rall_rs[2:N], Z, l)
+
+
+            
+            H0 = -0.5*( diagm(grid1.(rall_rs[2:N]).^2)*D2 + diagm(grid2.(rall_rs[2:N])) *D  ) + Vc
+
+            #H0 = -0.5 * diagm(1.0 ./ r.^2)*D*diagm(r).^2*D + Vc
+            push!(H0_L, H0)
+        end
+        Vc = getVcoulomb(rall_rs[2:N], Z, 0)
+
+        
+        Ham = zeros(N-1, N-1)
+        
+        vects = zeros(Complex{Float64}, N-1, N-1, nspin, lmax+1)
+        vals_r = zeros(Float64, N-1, nspin, lmax+1)    
+
+        VH = zeros(size(rho)[1],1)
+
+        VLDA = zeros(size(rho))
+        
+        filling = zeros(size(vals_r))
+        Vtot = zeros(size(rho)[1]-2, nspin, lmax+1)
+        
+    end
+
+    eigs_tot_old = sum(filling.*vals_r)
+    
+    for iter = 1:niters
+
+        println()
+        #        VLDA = diagm(v_LDA.(rho[2:N]))
+#        println(size(rho))
+#        println("LDA")
+
+        if nspin == 1
+            VLDA[:,1] = v_LDA.(rho[:, 1])
+        elseif nspin == 2
+            tt =  v_LDA_sp.(rho[:, 1], rho[:, 2])
+            VLDA[:,:] = reshape(vcat(tt...), nspin,N+1)'
+        end
+
+#        println("poisson")        
+        begin
+            rho_tot = sum(rho, dims=2)
+            VH[:] = V_H3( rho_tot[2:N], rall_rs[2:N],w,H_poisson,Rmax, rall_rs, sum(nel), ig1=ig1[2:N])
+            VH_mat = diagm(VH[2:N])
+        end
+
+#       return VLDA[:,1], VH, rall_rs
+#
+        
+#        println("eig")
+        for spin = 1:nspin
+            VLDA_mat = diagm(VLDA[2:N,spin])
+            Vtot[:,spin, lmax+1] = VH[2:N] + VLDA[2:N,spin] + diag(Vc)
+            for l = 0:lmax
+
+                Ham[:,:] = H0_L[l+1] + (VH_mat + VLDA_mat)
+                vals, v = eigen(Ham)
+                #vals, v = eigs(Ham, which=:SM, nev=4)
+                vals_r[:,spin,l+1] = real.(vals)
+                vects[:,:,spin,l+1] = v
+
+                println("iter $iter vals spin =  $spin l = $l ", vals_r[1:min(5, size(vals_r)[1]), spin, l+1])
+            end
+        end
+
+#        println("ass")
+        rho_new, filling, rhor2 = assemble_rho(vals_r, vects, nel, rall_rs, wall, rho, N, Rmax, D2Xgrid, nspin=nspin, lmax=lmax, ig1 = ig1)
+
+#        println("filling ", filling)
+
+        eigs_tot_new = sum(filling.*vals_r)
+        if iter > 1 && abs(eigs_tot_old-eigs_tot_new) < 1e-8
+            println()
+            println("eigval-based convergence reached ", abs(eigs_tot_old-eigs_tot_new))
+            println()
+            break
+        end
+        eigs_tot_old = eigs_tot_new
+
+        
+        n1in[:] = n2in[:]
+        n1out[:] = n2out[:]
+
+        n2in[:] = rho_old[:]
+        n2out[:] = rho_new[:]
+        
+        
+        if iter > 1 && mixing_mode == :pulay
+            for spin = 1:nspin
+                rho[:,spin] = pulay_mix(n1in[:,spin], n2in[:,spin], n1out[:,spin], n2out[:,spin], rho_old[:,spin], mix)
+            end
+        else
+            rho[:] = mix*rho[:] + (1.0-mix)*rho_old[:]
+        end
+        
+#        rho_veryold[:] = rho_old[:]
+        rho_old[:] = rho[:]
+    end
+
+    #println("energy")
+    energy = calc_energy(rho, N, Rmax, rall_rs, wall, VH, filling, vals_r, Vtot, Z, nspin=nspin, lmax=lmax, ig1=ig1)
+    
+    return energy, vals_r, vects, rho, rall_rs, wall, rhor2
+    
+end    
+
+function pulay_mix(n1in, n2in, n1out, n2out, rho_old, mix)
+
+
+    R1 = n1out - n1in
+    R2 = n2out - n2in
+    
+    B = zeros(3,3)
+    B[1,3] = 1
+    B[2,3] = 1
+    B[3,3] = 0.0
+    B[3,1] = 1
+    B[3,2] = 1
+    
+    R = zeros(3,1)
+    R[3,1] = 1.0
+    
+                    
+    B[1,1] = R1' * R1
+    B[2,2] = R2' * R2
+    B[1,2] = R1' * R2
+    B[2,1] = R2' * R1
+    
+    c = B \ R
+    
+    n_pulay = n1out * c[1,1] + n2out * c[2,1]
+    t = (1-mix) * rho_old + (mix) * n_pulay
+    #t =  n_pulay 
+    
+    return t
+
+end
 
 
 end #end module

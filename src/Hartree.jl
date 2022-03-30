@@ -88,12 +88,16 @@ function V_H2(N, n, Rmax)
 end
 
 
-function V_H3(rho,r,w,Ham ,Rmax, rall, nel)
+function V_H3(rho,r,w,Ham ,Rmax, rall, nel; ig1=missing)
 
+    if ismissing(ig1)
+        ig1 = ones(size(r))
+    end
+    
     a = 0.0
     b = Rmax
     
-    VH0 = 4.0*pi*sum(rho.*r.*w)
+    VH0 = 4.0*pi*sum(rho.*r.*w.*ig1)
     #VH0 = nel
     #println("VH0 H3  $VH0")
 
