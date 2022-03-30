@@ -272,15 +272,15 @@ function get_initial_rho(rho_init, N, Z, nel, r, w; nspin=1, checknorm=true)
                 elseif l == 3
                     maxfill = 14/ nspin
                 end
-                
+                println("fill $n $l $maxfill")
                 psi = h_rad(n, l;Z=Z)
-                    if nleft <= maxfill/ nspin + 1e-15
+                    if nleft <= maxfill + 1e-15
                         #                    println("size rho $(size(rho)) r $(size(r)) psir $(size(psi.(r))) ")
                         rho[:,spin] += psi.(r).^2 * nleft
                         break
                     else
-                        rho[:,spin] += psi.(r).^2 * maxfill/ nspin
-                        nleft -= maxfill/ nspin
+                        rho[:,spin] += psi.(r).^2 * maxfill
+                        nleft -= maxfill
                     end
             end
         end
