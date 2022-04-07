@@ -60,3 +60,58 @@ tol_var=1e-8
     @test isapprox(a,real(b),atol=1e-4)
     
 end
+
+@testset "real angmom" begin
+
+    function y11(t,p)
+        return -(3/(8*pi))^0.5*sin(t)*exp(im*p) 
+    end
+    function y10(t,p)
+        return (3/(4*pi))^0.5*cos(t)
+    end
+
+    function px(t,p)
+        return -sqrt(2)*real(y11(t,p))
+    end
+    function py(t,p)
+        return -sqrt(2)*imag(y11(t,p))
+    end
+    function pz(t,p)
+        return real(y10(t,p))
+    end
+
+    function s(t,p)
+        return 1/(4*pi)^0.5
+    end
+
+    function dz2(t,p)
+        return 1/4 * sqrt(5/pi) * (3*cos(t)^2 - 1)
+    end
+    
+#    ZZ = ChebyshevDFT.AngMom.construct_real_gaunt_indirect(lmax=6);
+
+    c = ChebyshevDFT.AngMom.inds[(1,0)]
+    
+    b = QuadGK.quadgk(p-> QuadGK.quadgk(t-> sin(t)* ( pz(t,p)*s(t,p)*pz(t,p)) , 0, pi,atol=1e-6)[1], 0,2*pi, atol=1e-6)[1]
+
+    
+
+    #    d = FastSphericalHarmonics.sph_mode(0,0)
+    
+#    display(ZZ[d[1],d[2],c])
+    println("a ", ChebyshevDFT.AngMom.real_gaunt_dict[(0,0,1,0)])
+    println("b " , b)
+    
+
+#    c = ChebyshevDFT.AngMom.inds[(1,0)]
+    
+    b = QuadGK.quadgk(p-> QuadGK.quadgk(t-> sin(t)* ( pz(t,p)*dz2(t,p)*pz(t,p)) , 0, pi,atol=1e-6)[1], 0,2*pi, atol=1e-6)[1]
+
+#    d = FastSphericalHarmonics.sph_mode(2,0)
+    
+#    display(ZZ[d[1],d[2],c])
+    println("a ", ChebyshevDFT.AngMom.real_gaunt_dict[(2,0,1,0)])
+    println("b " , b)
+    
+    
+end

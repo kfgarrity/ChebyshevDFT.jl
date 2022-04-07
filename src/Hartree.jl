@@ -88,7 +88,7 @@ function V_H2(N, n, Rmax)
 end
 
 
-function V_H3(rho,r,w,Ham ,Rmax, rall, nel; ig1=missing)
+function V_H3(rho,r,w,Ham ,Rmax, rall, nel; ig1=missing, l = 0)
 
     if ismissing(ig1)
         ig1 = ones(size(r))
@@ -96,8 +96,14 @@ function V_H3(rho,r,w,Ham ,Rmax, rall, nel; ig1=missing)
     
     a = 0.0
     b = Rmax
+
+    if l == 0 
+        VH0 = 4.0*pi*sum(rho.*r.*w.*ig1)
+    else
+        VH0 = 0.0
+        nel = 0.0
+    end
     
-    VH0 = 4.0*pi*sum(rho.*r.*w.*ig1)
     #VH0 = nel
     #println("VH0 H3  $VH0")
 
@@ -111,7 +117,7 @@ function V_H3(rho,r,w,Ham ,Rmax, rall, nel; ig1=missing)
 
     
     
-    C = Ham \ B
+    C = (Ham - diagm((l)*(l+1)./r))  \ B
 
     C = [0;C;0]  + VH0*(1 .- rall / Rmax) + rall * nel / Rmax^2
 

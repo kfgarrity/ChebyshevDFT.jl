@@ -17,6 +17,11 @@ using ..Hartree:V_H3
 using ..AngMom:gaunt
 using Base.Threads
 
+using SphericalHarmonics
+using FastSphericalHarmonics
+
+include("Atomlist.jl")
+
 #using QuadGK
 #using Arpack
 
@@ -325,7 +330,7 @@ function assemble_rho(vals_r, vects, nel, rall, wall, rho, N, Rmax, D2; nspin=1,
                 
                 vnorm = vnorm / (4.0*pi*sum(vnorm .* wall .* ig1))# .* rall.^2))
 
- #               println("vnorm ", vnorm[1:3])
+                println("vnorm ", vnorm[1:3])
 
                 #                vects[:,i,spin,l+1] = sign.(real.(vects[:,i,spin,l+1])) .* sqrt.(abs.(real.(vnorm[2:N])))
                 
@@ -353,7 +358,10 @@ function assemble_rho(vals_r, vects, nel, rall, wall, rho, N, Rmax, D2; nspin=1,
         rho[2:end,spin] = (rho[2:end,spin]./rall[2:end].^2  )  / norm * sum(nel[:,spin])
 #        println("d2r ", d2r)
         rho[1,spin] = d2r[1]/2.0 / norm * sum(nel[:,spin])
-#        println("check norm2 spin $spin ", 4.0*pi*sum(rho[:,spin] .* wall .* rall.^2 ) )
+
+        println("check ", rho[1:3,spin])
+
+        #        println("check norm2 spin $spin ", 4.0*pi*sum(rho[:,spin] .* wall .* rall.^2 ) )
         
 #        CR = ChebyshevQuantum.Interp.make_cheb(rho[:,spin], a= 0.0, b = 60.0)
 #        CR2 = ChebyshevQuantum.Interp.make_cheb(x -> CR(x) / x^2, a= 1e-1, b = 60.0);
@@ -393,9 +401,10 @@ function assemble_rho_LM(vals_r, vects, nel, rall, wall, rho, N, Rmax, D2; nspin
     for spin = 1:nspin
         for l = 0:lmax
             for m = -l:l
+                println("nel $spin $l $m ", nel[spin, l+1, m+l+1])
                 fillval = 2.0
-                nleft = nel[l+1, spin]
-
+                nleft = nel[spin, l+1, m+l+1]
+                println("$l $m nleft $nleft $fillval")
                 if nleft < 1e-20
                     nleft = 1e-20
                 end
@@ -406,12 +415,13 @@ function assemble_rho_LM(vals_r, vects, nel, rall, wall, rho, N, Rmax, D2; nspin
 
                     vnorm = vnorm / (4.0*pi*sum(vnorm .* wall .* ig1))# .* rall.^2))
 
+                    println("vnormLM ", vnorm[1:3])
                     
                     if nleft <= fillval/nspin + 1e-10
                         t = vnorm[2:N]  * nleft 
                         for ll = 0:(lmax*2)
                             for mm = -ll:ll
-                                rho[2:N,spin, ll+1, mm+ll+1] += t * gaunt(l,ll,l,m,mm,m)
+                                rho[2:N,spin, ll+1, mm+ll+1] += t * gaunt(l,ll,l,m,-mm,m)*(-1)^mm
                             end
                         end
 
@@ -421,7 +431,7 @@ function assemble_rho_LM(vals_r, vects, nel, rall, wall, rho, N, Rmax, D2; nspin
                         t = vnorm[2:N]  * fillval / nspin
                         for ll = 0:(lmax*2)
                             for mm = -ll:ll
-                                rho[2:N,spin, ll+1, mm+ll+1] += t * gaunt(l,ll,l,m,mm,m)
+                                rho[2:N,spin, ll+1, mm+ll+1] += t * gaunt(l,ll,l,m,-mm,m)*(-1)^mm
                             end
                         end
                         
@@ -438,18 +448,23 @@ function assemble_rho_LM(vals_r, vects, nel, rall, wall, rho, N, Rmax, D2; nspin
         end
 
 
-        norm = 4.0*pi*sum(rho[:,spin,1,1] .* wall .*ig1 ) #.* rall.^2
-#
-        rhor2[:,spin] = rho[:,spin,1,1] /norm*sum(nel[:,spin])
+        norm = 4.0*pi*sum(rho[:,spin,1,1] .* wall .*ig1 ) #/ (4*pi)^0.5  #.* rall.^2
+        println("norm ", norm)
+        
+        rhor2[:,spin] = rho[:,spin,1,1] #/norm*sum(nel[spin,:,:])
         d2r = (D2[:,:] * rho[:,spin,1,1])  #/ norm * sum(nel[:,spin])  
 
         for ll = 0:(lmax*2)
              for mm = -ll:ll
                  if ll == 0 && mm == 0
-                     rho[2:end,spin, 1,1] = (rho[2:end,spin, ll+1, mm+ll+1]./rall[2:end].^2  ) / norm * sum(nel[:,spin])
-                     rho[1,spin,1,1] = d2r[1]/2.0 / norm * sum(nel[:,spin])
+#                     println("norm $norm")
+                     rho[2:end,spin, 1,1] = (rho[2:end,spin, 1, 1]./rall[2:end].^2  ) #/ norm * sum(nel[spin,:,:]) #* sqrt(4*pi)
+                     rho[1,spin,1,1] = d2r[1]/2.0 # / norm * sum(nel[spin,:,:])
+                     println("check ", rho[1:3,spin,1,1])
+#                     println("check ", sum(rho[:,spin,1,1] .* rall.^2 .* wall .* ig1)*4*pi*sqrt(4*pi) )
+                     
                  else
-                     rho[2:end,spin, ll+1, mm+ll+1] = (rho[2:end,spin, ll+1, mm+ll+1]./rall[2:end].^2  )
+                     rho[2:end,spin, ll+1, mm+ll+1] = (rho[2:end,spin, ll+1, mm+ll+1]./rall[2:end].^2  ) 
                  end
              end
         end
@@ -641,7 +656,7 @@ function DFT_spin_l_grid(nel; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init = m
             end
             #            for l = 0:lmax
 
-            Ham = H0_L[l+1] + (VH_mat + VLDA_mat)
+            Ham = H0_L[l+1] +0.0* (VH_mat + VLDA_mat)
             vals, v = eigen(Ham)
             #vals, v = eigs(Ham, which=:SM, nev=4)
             vals_r[:,spin,l+1] = real.(vals)
@@ -693,7 +708,7 @@ function DFT_spin_l_grid(nel; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init = m
     #println("energy")
     energy = calc_energy(rho, N, Rmax, rall_rs, wall, VH, filling, vals_r, Vtot, Z, nspin=nspin, lmax=lmax, ig1=ig1)
     
-    return energy, vals_r, vects, rho, rall_rs, wall, rhor2
+    return energy, vals_r, vects, rho, rall_rs, wall, rhor2, VH
     
 end    
 
@@ -736,33 +751,155 @@ end
 """
 1 s 2.0
 2 s 2.0
-2 px 2.0
-3 py 2.0
-3 pz 2.0
+2 p 2.0
+3 p 2.0
+3 p 2.0
 """
 function setup_filling(fill_str)
-    
-#    for line in fill_str
+
+    T = []
+    nspin = 1
+    lmax = 0
+    for line in split(fill_str, "\n")
+        sp = split(line)
+
+        if length(sp) == 0
+            continue
+        end
         
+        #starting
+        if length(sp) == 1
+            tsp = String.(sp[1])
+            if tsp in keys(atoms)
+                num_el = atoms[tsp]
+                for toadd in   [ [1,0,0,2.0],
+                                 [2,0, 0,2.0],
+                                 [2,1, 1,2.0],
+                                 [2,1, 0,2.0],
+                                 [2,1,-1,2.0],
+                                 [3,0, 0,2.0],
+                                 [3,1, 1,2.0],
+                                 [3,1, 0,2.0],
+                                 [3,1,-1,2.0],
+                                 [4,0, 0,2.0],
+                                 [3,2, 2,2.0],
+                                 [3,2, 1,2.0],
+                                 [3,2, 0,2.0],
+                                 [3,2,-1,2.0],
+                                 [3,2,-2,2.0],
+                                 [4,1, 1,2.0],
+                                 [4,1, 0,2.0],
+                                 [4,1,-1,2.0],
+                                 [5,0, 0,2.0],
+                                 [4,2, 2,2.0],
+                                 [4,2, 1,2.0],
+                                 [4,2, 0,2.0],
+                                 [4,2,-1,2.0],
+                                 [4,2,-2,2.0],
+                                 [5,1, 1,2.0],
+                                 [5,1, 0,2.0],
+                                 [5,1,-1,2.0],
+                                 [6,0, 0,2.0],
+                                 [4,3, 3,2.0],
+                                 [4,3, 2,2.0],
+                                 [4,3, 1,2.0],
+                                 [4,3, 0,2.0],
+                                 [4,3,-1,2.0] ,
+                                 [4,3,-2,2.0],
+                                 [4,3,-3,2.0],
+                                 [5,2, 2,2.0],
+                                 [5,2, 1,2.0],
+                                 [5,2, 0,2.0],
+                                 [5,2,-1,2.0],
+                                 [5,2,-2,2.0],
+                                 [6,1, 1,2.0],
+                                 [6,1, 0,2.0],
+                                 [6,1,-1,2.0] ]
+                    if toadd[4]+1e-15 < (num_el)
+                        push!(T,toadd)
+                        num_el -= 2.0
+                        lmax = max(lmax, Int64(toadd[2]))
+                    else
+                        push!(T,[toadd[1],toadd[2], toadd[3], num_el])
+                        lmax = max(lmax, Int64(toadd[2]))
+                        num_el = 0.0
+                        break
+                    end
+                end
+            else
+                throw(ArgumentError(sp, "setup_filling error"))
+            end
+            continue
+        end
 
+        n = parse(Int64, sp[1])
+        if sp[2] == "s" || sp[2] == "0"
+            l = 0
+        elseif sp[2] == "p" || sp[2] == "1"
+            l = 1
+        elseif sp[2] == "d" || sp[2] == "2"
+            l = 2
+        elseif sp[2] == "f" || sp[2] == "3"
+            l = 3
+        elseif sp[2] == "g" || sp[2] == "4"
+            l = 4
+        else
+            println("err setup_filling $sp")
+            throw(ArgumentError(sp, "setup_filling error"))
+        end
+        lmax = max(lmax, l)
+        
+        m=0
+        for x in -l:l
+            if string(x) == String.(sp[3])
+                m = x
+                break
+            end
+        end
+        
+        if length(sp) == 5
+            nspin = 2
+            push!(T, [n,l,m,parse(Float64, sp[4]), parse(Float64, sp[5])])
+        else
+            push!(T, [n,l,m, parse(Float64, sp[4])])
+        end
+    end        
+         
+    nel = zeros(nspin, lmax+1, (2*lmax+1))
+    for t in T
+        if length(t) == 4
+            n,l,m,num_el = t
+            n = Int64(n)
+            l = Int64(l)
+            m = Int64(m)
+            if nspin == 1
+                nel[1,l+1,l+m+1] += num_el
+            else
+                nel[1,l+1,l+m+1] += num_el/2.0
+                nel[2,l+1,l+m+1] += num_el/2.0
+            end
+        elseif length(t) == 5
+            n,l,m,num_el_up, num_el_dn = t
+            n = Int64(n)
+            l = Int64(l)
+            m = Int64(m)
+            nel[1,l+1,l+m+1] += num_el_up
+            nel[2,l+1,l+m+1] += num_el_dn
+        end
+    end
+
+    return nel, nspin, lmax
     
-
 end
 
 
-function DFT_spin_l_grid_LM(nel; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init = missing, niters=20, mix = 1.0, mixing_mode=:pulay, ax = 0.02)
+function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init = missing, niters=20, mix = 1.0, mixing_mode=:pulay, ax = 0.02)
 
     Z = Float64(Z)
-    nel = Float64.(nel)
-    
-    if length(size(nel)) == 1
-        nspin = 1
-    else
-        nspin = size(nel)[2]
-    end
-    
-    lmax = size(nel)[1] - 1
+    nel, nspin, lmax = setup_filling(fill_str)
+
     lmax_rho = lmax * 2
+    
     println()
     println("Running Z= $Z with nspin= $nspin lmax= $lmax Nel= ", sum(nel))
     println()
@@ -808,13 +945,19 @@ function DFT_spin_l_grid_LM(nel; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init 
         D2Xgrid = ( diagm(grid1.(rall_rs).^2)*D2X + diagm(grid2.(rall_rs)) *D1X  )
 
         
-        rho = get_initial_rho(rho_init, N, Z, nel,rall_rs,wall, nspin=nspin, ig1=ig1)
+        if nspin == 1
+            nel_t = [sum(nel)]
+        else
+            nel_t = [sum(nel[1,:,:,:]) sum(nel[2,:,:,:])]
+        end
+            
+        rho = get_initial_rho(rho_init, N, Z, nel_t,rall_rs,wall, nspin=nspin, ig1=ig1)
 
         #                R  SPIN       L            m
         rho_LM = zeros(N+1, nspin, lmax_rho+1, (2*lmax_rho+1))
-        
+
         for spin in 1:nspin
-            rho_LM[:,spin,1,1] = rho[:,spin]
+            rho_LM[:,spin,1,1] = rho[:,spin]/(4*pi)^0.5
         end
         
         
@@ -836,9 +979,10 @@ function DFT_spin_l_grid_LM(nel; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init 
         for l = 0:lmax
             Vc = getVcoulomb(rall_rs[2:N], Z, l)
             H0 = -0.5*( diagm(grid1.(rall_rs[2:N]).^2)*D2 + diagm(grid2.(rall_rs[2:N])) *D  ) + Vc
-
+            
             #H0 = -0.5 * diagm(1.0 ./ r.^2)*D*diagm(r).^2*D + Vc
             push!(H0_L, H0)
+                  
         end
         Vc = getVcoulomb(rall_rs[2:N], Z, 0)
 
@@ -848,8 +992,10 @@ function DFT_spin_l_grid_LM(nel; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init 
         vects = zeros(Complex{Float64}, N-1, N-1, nspin, lmax+1, 2*lmax+1)
         vals_r = zeros(Float64, N-1, nspin, lmax+1,2*lmax+1)    
 
-        VH = zeros(size(rho)[1],1)
+        VH_LM = zeros(size(rho_LM)[[1,3,4]])
+        VH = zeros(size(rho)[1])
 
+        VLDA_LM = zeros(size(rho_LM))
         VLDA = zeros(size(rho))
         
         filling = zeros(size(vals_r))
@@ -876,6 +1022,9 @@ function DFT_spin_l_grid_LM(nel; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init 
 #        println(size(rho))
 #        println("LDA")
 
+
+        
+        rho[:,:] = rho_LM[:,:,1,1] * sqrt(4*pi)
         if nspin == 1
             VLDA[:,1] = v_LDA.(rho[:, 1])
         elseif nspin == 2
@@ -885,9 +1034,14 @@ function DFT_spin_l_grid_LM(nel; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init 
 
 #        println("poisson")        
         begin
-            rho_tot = sum(rho, dims=2)
-            VH[:] = V_H3( rho_tot[2:N], rall_rs[2:N],w,H_poisson,Rmax, rall_rs, sum(nel), ig1=ig1[2:N])
-            VH_mat = diagm(VH[2:N])
+            #rho_tot = sum(rho, dims=2)
+            for (spin,l,m) in spin_lm
+                if spin == 2
+                    continue
+                end
+                rho_tot = sum(rho_LM[:,:,l+1,l+m+1], dims=2)
+                VH_LM[:,l+1,m+l+1] = V_H3( rho_tot[2:N], rall_rs[2:N],w,H_poisson,Rmax, rall_rs, sum(nel)/sqrt(4*pi), ig1=ig1[2:N])
+            end
         end
 
 #       return VLDA[:,1], VH, rall_rs
@@ -897,19 +1051,30 @@ function DFT_spin_l_grid_LM(nel; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init 
 
 
 
-
-        @threads for i = 1:length(spin_lm)
+        #        @threads 
+        for i = 1:length(spin_lm)
             spin = spin_lm[i][1]
             l = spin_lm[i][2]
             m = spin_lm[i][3]
+
             
             VLDA_mat = diagm(VLDA[2:N,spin])
-            if l == 0
-                Vtot[:,spin, lmax+1] = VH[2:N] + VLDA[2:N,spin] + diag(Vc)
+            VH[:] .= 0.0
+            for ll = 0:(2*lmax)
+                for mm = -ll:ll
+                    VH += 4*pi*VH_LM[:, ll+1, mm+ll+1] * gaunt(l,ll,l,m,mm,m)
+                end
             end
+
+            VH_mat = diagm(VH[2:N])
+            
+            #            if l == 0
+#                Vtot[:,spin, lmax+1] = VH[2:N] + VLDA[2:N,spin] + diag(Vc)
+            #            end
+            
             #            for l = 0:lmax
 
-            Ham = H0_L[l+1] + 0.0*(VH_mat + VLDA_mat)
+            Ham = H0_L[l+1] + (VH_mat + VLDA_mat)
             vals, v = eigen(Ham)
             #vals, v = eigs(Ham, which=:SM, nev=4)
             println("spin $spin l $l m $m")
@@ -926,9 +1091,10 @@ function DFT_spin_l_grid_LM(nel; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init 
                 end
             end
         end
-        
+        println("rho_LM ", rho_LM[1:3,1,1,1])
 #        println("ass")
         rho_new_LM, filling, rhor2 = assemble_rho_LM(vals_r, vects, nel, rall_rs, wall, rho_LM, N, Rmax, D2Xgrid, nspin=nspin, lmax=lmax, ig1 = ig1)
+        println("rho_new_LM ", rho_LM[1:3,1,1,1])
 
 #        println("filling ", filling)
 
@@ -955,7 +1121,7 @@ function DFT_spin_l_grid_LM(nel; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init 
                 rho[:,spin] = pulay_mix(n1in[:,spin], n2in[:,spin], n1out[:,spin], n2out[:,spin], rho_old[:,spin], mix)
             end
         else
-            rho_LM[:] = mix*rho_LM[:] + (1.0-mix)*rho_old_LM[:]
+            rho_LM[:] = mix*rho_new_LM[:] + (1.0-mix)*rho_old_LM[:]
         end
         
 #        rho_veryold[:] = rho_old[:]
@@ -963,46 +1129,64 @@ function DFT_spin_l_grid_LM(nel; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init 
     end
 
     #println("energy")
-    energy = calc_energy(rho, N, Rmax, rall_rs, wall, VH, filling, vals_r, Vtot, Z, nspin=nspin, lmax=lmax, ig1=ig1)
-    
-    return energy, vals_r, vects, rho_LM, rall_rs, wall, rhor2
+#    energy = calc_energy(rho, N, Rmax, rall_rs, wall, VH, filling, vals_r, Vtot, Z, nspin=nspin, lmax=lmax, ig1=ig1)
+    energy = 0.0
+    return energy, vals_r, vects, rho_LM, rall_rs, wall.*ig1, rhor2, VH_LM, VH
     
 end    
 
-function pulay_mix(n1in, n2in, n1out, n2out, rho_old, mix)
 
-    if sum(rho_old) < 1e-5 #fixes the case a spin channel is totally empty
-        return rho_old
+function EXC_LM(rho_LM, spin_lm)
+
+    rho = zeros(size(rho_LM)[1:2])
+    VLDA = zeros(size(rho))
+    
+    nspin = size(rho)[2]
+
+    VLDA_LM = zeros(size(rho_LM))
+
+    
+    for theta = [0.0, pi]
+        for phi = [0.0, pi/2, pi, 3*pi/2]
+            rho = get_rho_rs(rho, rho_LM, spin_lm, theta, phi)
+
+            if nspin == 1
+                VLDA[:,1] = v_LDA.(rho[:, 1])
+            elseif nspin == 2
+                tt =  v_LDA_sp.(rho[:, 1], rho[:, 2])
+                VLDA[:,:] = reshape(vcat(tt...), nspin,N+1)'
+            end
+
+            VLDA_LM[:,:,l+1, l+m+1] += VLDA[:,:] * Y[(l,m)]
+                
+        end
     end
+
     
-    R1 = n1out - n1in
-    R2 = n2out - n2in
-    
-    B = zeros(3,3)
-    B[1,3] = 1
-    B[2,3] = 1
-    B[3,3] = 0.0
-    B[3,1] = 1
-    B[3,2] = 1
-    
-    R = zeros(3,1)
-    R[3,1] = 1.0
-    
-                    
-    B[1,1] = R1' * R1
-    B[2,2] = R2' * R2
-    B[1,2] = R1' * R2
-    B[2,1] = R2' * R1
-    
-    c = B \ R
-    
-    n_pulay = n1out * c[1,1] + n2out * c[2,1]
-    t = (1-mix) * rho_old + (mix) * n_pulay
-    #t =  n_pulay 
-    
-    return t
 
 end
+
+function get_rho_rs(rho, rho_LM)
+
+    lmax = size(rho_LM)[3]-1
+    THETA,PHI = FastSphericalHarmonics.sph_points(lmax+1)
+
+    RHO = zeros(size(rho_LM))
+    
+    for theta in THETA
+        for phi in PHI
+            Y = SphericalHarmonics.computeYlm(theta, phi, lmax=lmax)
+            rho[:,:] .= 0.0
+            for (spin, l, m) in spin_lm
+                rho[:,spin] += 4*pi*rho_LM[:,spin, l+1, l+m+1] * Y[(l,m)]
+            end
+        end
+    end
+            
+    return rho
+
+end
+
 
 
 end #end module
