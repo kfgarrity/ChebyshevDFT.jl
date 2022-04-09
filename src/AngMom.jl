@@ -51,7 +51,7 @@ function construct_real_gaunt_indirect(; lmax=6)
         end
     end
     
-#    return ZZ
+    return ZZ
     
 end
 

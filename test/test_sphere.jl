@@ -1,3 +1,5 @@
+using FastSphericalHarmonics
+using SphericalHarmonics
 using ChebyshevQuantum
 using Test
 using QuadGK
@@ -6,8 +8,8 @@ tol_var=1e-8
 @testset "test sphere" begin
 
 
-
-    theta,phi = FastSphericalHarmonics.sph_points(2)
+    lmax=3
+    theta,phi = FastSphericalHarmonics.sph_points(lmax+1)
     z = zeros(Float64, length(theta), length(phi))
 
     function y11(t,p)
@@ -33,7 +35,7 @@ tol_var=1e-8
     
     for (i,t) = enumerate(theta)
         for (j,p) = enumerate(phi)
-            z[i,j] = s(t,p)
+            z[i,j] = pz(t,p)^2
         end
     end
     
@@ -45,6 +47,22 @@ tol_var=1e-8
     println("zlm")
     display(zlm)
 
+    zlm2 = zeros(size(zlm))
+    println("slow transform")
+    for (i,t) = enumerate(theta)
+        for (j,p) = enumerate(phi)
+            Y = SphericalHarmonics.computeYlm(t, p, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())
+            for l = 0:lmax
+                for m = -l:l
+                    d = FastSphericalHarmonics.sph_mode(l,m)
+                    zlm2[d[1],d[2]] += z[i,j]*Y[(l,m)]*sin(t)  / length(theta) / length(pi) * 2 * pi
+                end
+            end
+        end
+    end
+    println("zlm2")
+    display(zlm2)
+    
     zz = FastSphericalHarmonics.sph_evaluate(zlm)
     println()
     println("zz")
