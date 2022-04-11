@@ -122,7 +122,8 @@ function V_H3(rho,r,w,Ham ,Rmax, rall, nel; ig1=missing, l = 0)
     C = [0;C;0]  + VH0*(1 .- rall / Rmax) + rall * nel / Rmax^2
 
     #C = C  + VH0*(1 .- r / Rmax) + r * nel / Rmax^2
-    
+
+    println("v_h3 $l ", sum(abs.(C)), " rho ", sum(abs.(rho)), " B ", sum(abs.(B)), " vh0 $VH0 nel $nel")
     return C
     
 end
