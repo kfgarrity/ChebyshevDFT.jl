@@ -97,11 +97,18 @@ function V_H3(rho,r,w,Ham ,Rmax, rall, nel; ig1=missing, l = 0)
     a = 0.0
     b = Rmax
 
+#    nel_calc = 4.0*pi*sum(rho.*r.^(2+l).*w.*ig1) / (2*l+1)
+#    println("l $l  nel $nel $nel_calc")
     if l == 0 
         VH0 = 4.0*pi*sum(rho.*r.*w.*ig1)
     else
+        #VH0 = 4.0*pi*sum(rho.*r.*w.*ig1)
+
+        #VH0 = 4.0*pi*sum(rho.*r.*w.*ig1) / (2*l+1)
         VH0 = 0.0
-        nel = 0.0
+        
+        nel = 4.0*pi*sum(rho.*r.^(2+l).*w.*ig1) / (2*l+1)
+        #nel = 0.0
     end
     
     #VH0 = nel
@@ -109,7 +116,7 @@ function V_H3(rho,r,w,Ham ,Rmax, rall, nel; ig1=missing, l = 0)
 
     #Ham = D2 +  diagm( 2.0 ./ r )  * D 
 
-    B = (-4.0*pi)*rho  .+ (2.0 ./ r ) * (VH0 / Rmax - nel / Rmax^2)
+    B = (-4.0*pi)*rho  .+ (2.0 ./ r ) * (VH0 / Rmax - nel / Rmax / Rmax^(l+1) )
 
 #    println("H ", Ham[1:2,1:2])
 #    println("B ", B[1])
@@ -117,13 +124,14 @@ function V_H3(rho,r,w,Ham ,Rmax, rall, nel; ig1=missing, l = 0)
 
     
     
-    C = (Ham - diagm((l)*(l+1)./r))  \ B
+    C = (Ham - diagm((l)*(l+1)./r.^2))  \ B
 
-    C = [0;C;0]  + VH0*(1 .- rall / Rmax) + rall * nel / Rmax^2
+    #    C = [0;C;0]  + VH0*(1 .- rall / Rmax) + rall * nel / Rmax^2
+    C = [0;C;0]  + VH0*(1 .- rall / Rmax) + rall * nel / Rmax / Rmax^(l+1)
 
     #C = C  + VH0*(1 .- r / Rmax) + r * nel / Rmax^2
 
-    println("v_h3 $l ", sum(abs.(C)), " rho ", sum(abs.(rho)), " B ", sum(abs.(B)), " vh0 $VH0 nel $nel")
+#    println("v_h3 $l ", sum(abs.(C)), " rho ", sum(abs.(rho)), " B ", sum(abs.(B)), " vh0 $VH0 nel $nel")
     return C
     
 end

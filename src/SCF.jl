@@ -406,7 +406,7 @@ function assemble_rho_LM(vals_r, vects, nel, rall, wall, rho, N, Rmax, D2; nspin
                 fillval = 2.0
                 d1 = FastSphericalHarmonics.sph_mode(l,m)
                 nleft = nel[spin, d1[1], d1[2]]
-                println("$l $m nleft $nleft $nleft")
+#                println("$l $m nleft $nleft $nleft")
                 if nleft < 1e-20
                     nleft = 1e-20
                 end
@@ -426,9 +426,9 @@ function assemble_rho_LM(vals_r, vects, nel, rall, wall, rho, N, Rmax, D2; nspin
                                 #                                rho[2:N,spin, ll+1, mm+ll+1] += t  * gaunt(l,ll,l,m,-mm,m)*(-1)^mm
                                 d = FastSphericalHarmonics.sph_mode(ll,mm)
                                 rho[2:N,spin, d[1], d[2]] += t  * real_gaunt_dict[(ll,mm,l,m)]
-                                if sum(abs.(t  * real_gaunt_dict[(ll,mm,l,m)])) > 1e-5
-                                    println("$nleft | $l $m $ll $mm  rho $d , ", sum(abs.(t  * real_gaunt_dict[(ll,mm,l,m)])), " " , real_gaunt_dict[(ll,mm,l,m)])
-                                end
+#                                if sum(abs.(t  * real_gaunt_dict[(ll,mm,l,m)])) > 1e-5
+#                                    println("$nleft | $l $m $ll $mm  rho $d , ", sum(abs.(t  * real_gaunt_dict[(ll,mm,l,m)])), " " , real_gaunt_dict[(ll,mm,l,m)])
+#                                end
                             end
                         end
 
@@ -441,9 +441,9 @@ function assemble_rho_LM(vals_r, vects, nel, rall, wall, rho, N, Rmax, D2; nspin
                                 #rho[2:N,spin, ll+1, mm+ll+1] += t * gaunt(l,ll,l,m,-mm,m)*(-1)^mm
                                 d = FastSphericalHarmonics.sph_mode(ll,mm)
                                 rho[2:N,spin, d[1], d[2]] += t * real_gaunt_dict[(ll,mm,l,m)]
-                                if sum(abs.(t  * real_gaunt_dict[(ll,mm,l,m)])) > 1e-5
-                                    println("$nleft | $l $m $ll $mm  rho $d , ", sum(abs.(t  * real_gaunt_dict[(ll,mm,l,m)])), " " , real_gaunt_dict[(ll,mm,l,m)])
-                                end                                
+#                                if sum(abs.(t  * real_gaunt_dict[(ll,mm,l,m)])) > 1e-5
+#                                    println("$nleft | $l $m $ll $mm  rho $d , ", sum(abs.(t  * real_gaunt_dict[(ll,mm,l,m)])), " " , real_gaunt_dict[(ll,mm,l,m)])
+#                                end                                
                             end
                         end
                         
@@ -920,7 +920,7 @@ function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_
 
 
     
-    lmax_rho = lmax * 2
+    lmax_rho =  6
     
     println()
     println("Running Z= $Z with nspin= $nspin lmax= $lmax Nel= ", sum(nel))
@@ -1017,8 +1017,8 @@ function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_
         VH_LM = zeros(size(rho_LM)[[1,3,4]])
         VH = zeros(size(rho)[1])
 
-        VLDA_LM = zeros(size(rho_LM))
-        VLDA = zeros(size(rho))
+        vlda_LM = zeros(size(rho_LM))
+        VLDA = zeros(size(rho)[1])
         
         filling = zeros(size(vals_r))
         Vtot = zeros(size(rho)[1]-2, nspin, lmax+1)
@@ -1051,11 +1051,12 @@ function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_
         println()
         #        VLDA = diagm(v_LDA.(rho[2:N]))
         
-        println("LDA")
+        #println("LDA")
 
 
-        @time vlda_LM = VXC_LM(rho_LM *4*pi)
-        vlda_LM = vlda_LM #/ sqrt(4*pi)
+        vlda_LM = VXC_LM(rho_LM *4*pi)
+#        println("size vlda_LM ", size(vlda_LM))
+        #vlda_LM = vlda_LM #/ sqrt(4*pi)
         
 #        rho[:,:] = rho_LM[:,:,1,1] * sqrt(4*pi)
 
@@ -1086,8 +1087,8 @@ function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_
         
 #        println("check rho ", sum(abs.(rho)) / sum(abs.(t)))
         
-        println("poisson")        
-        @time begin
+#        println("poisson")        
+        begin
             #rho_tot = sum(rho, dims=2)
             for (spin,l,m) in spin_lm_rho
                 if spin == 2
@@ -1095,8 +1096,8 @@ function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_
                 end
                 d = FastSphericalHarmonics.sph_mode(l,m)
                 rho_tot = sum(rho_LM[:,:,d[1],d[2]], dims=2)
-                println("$spin $l $m  rho_tot ", sum(abs.(rho_tot)))
-                @time VH_LM[:,d[1],d[2]] = V_H3( rho_tot[2:N], rall_rs[2:N],w,H_poisson,Rmax, rall_rs, sum(nel)/sqrt(4*pi), ig1=ig1[2:N], l=d[1])
+#                println("$spin $l $m  rho_tot ", sum(abs.(rho_tot)))
+                VH_LM[:,d[1],d[2]] = V_H3( rho_tot[2:N], rall_rs[2:N],w,H_poisson,Rmax, rall_rs, sum(nel)/sqrt(4*pi), ig1=ig1[2:N], l=l)
             end
         end
 
@@ -1106,15 +1107,15 @@ function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_
 #        println("eig")
 
 
-        println("size VH_LM ", size(VH_LM))
-        println("sum VH")
-        println(sum(abs.(VH_LM), dims=[1]))
-        println()
+#        println("size VH_LM ", size(VH_LM))
+#        println("sum VH")
+#        println(sum(abs.(VH_LM), dims=[1]))
+#        println()
 
-        println("size vlda_LM ", size(vlda_LM))
-        println("sum vlda_LM")
-        println(sum(abs.(vlda_LM), dims=[1,2]))
-        println()
+#        println("size vlda_LM ", size(vlda_LM))
+#        println("sum vlda_LM")
+#        println(sum(abs.(vlda_LM), dims=[1,2]))
+#        println()
         
         
 
@@ -1135,15 +1136,15 @@ function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_
             
             VLDA[:] .= 0.0
             VH[:] .= 0.0
-            for ll = 0:(2*lmax)
+            for ll = 0:(lmax_rho)
                 for mm = -ll:ll
                     #                    VH += 4*pi*VH_LM[:, ll+1, mm+ll+1] * real_gaunt_dict[(ll,mm,l,m)]
                     d2 = FastSphericalHarmonics.sph_mode(ll,mm)
 
-                    VH += 4*pi*VH_LM[:, d2[1], d2[2]] * real_gaunt_dict[(ll,mm,l,m)]
-                    VLDA += vlda_LM[:,spin,d2[1], d2[2]] * real_gaunt_dict[(ll,mm,l,m)]
+                    VH += 4*pi*VH_LM[:, d2[1], d2[2]] * real_gaunt_dict[(ll,mm,l,m)] #/ (2*ll+1)
+                    VLDA += vlda_LM[:,spin,d2[1], d2[2]] * real_gaunt_dict[(ll,mm,l,m)] #/ (2*ll+1)
 
-                    println("vlda zzz $ll $mm $l $m ", sum(abs.(vlda_LM[:,spin, d[1], d[2]])), " g ", real_gaunt_dict[(ll,mm,l,m)])
+#                    println("vlda zzz $ll $mm $l $m ", sum(abs.(vlda_LM[:,spin, d[1], d[2]])), " g ", real_gaunt_dict[(ll,mm,l,m)])
                     
                 end
             end
@@ -1184,10 +1185,10 @@ function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_
 #        println("ass")
         rho_new_LM, filling, rhor2 = assemble_rho_LM(vals_r, vects, nel, rall_rs, wall, rho_LM, N, Rmax, D2Xgrid, nspin=nspin, lmax=lmax, ig1 = ig1)
 
-        println("size rho_new_LM ", size(rho_new_LM))
-        println("sum rho")
-        println(sum(abs.(rho_LM), dims=[1,2]))
-        println()
+#        println("size rho_new_LM ", size(rho_new_LM))
+#        println("sum rho")
+#        println(sum(abs.(rho_LM), dims=[1,2]))
+#        println()
         
 #        println("rho_new_LM ", rho_LM[1:3,1,1,1])
 
@@ -1226,7 +1227,7 @@ function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_
     #println("energy")
 #    energy = calc_energy(rho, N, Rmax, rall_rs, wall, VH, filling, vals_r, Vtot, Z, nspin=nspin, lmax=lmax, ig1=ig1)
     energy = 0.0
-    return energy, vals_r, vects, rho_LM, rall_rs, wall.*ig1, rhor2, VH_LM, VH
+    return energy, vals_r, vects, rho_LM, rall_rs, wall.*ig1, rhor2, vlda_LM
     
 end    
 
@@ -1245,7 +1246,7 @@ function VXC_LM(rho_LM)
     #convert to real (theta phi) space
 #    println("convert")
 
-#    @time for r in 1:nr
+#    for r in 1:nr
 #        for spin = 1:nspin
 #            rho[r,spin,:,:] = FastSphericalHarmonics.sph_evaluate(rho_LM[r,spin,:,:])
 #        end
@@ -1253,17 +1254,20 @@ function VXC_LM(rho_LM)
 
     #rho2 = deepcopy(rho)
 #    println("rho v2")
-    @time rho = get_rho_rs(rho, rho_LM) 
-#    println(rho2[1:5,1,1,1])
+
+    rho = get_rho_rs(rho, rho_LM) 
+
+    #    println(rho2[1:5,1,1,1])
 #    println(rho[1:5,1,1,1])
     
     #test
     #test = FastSphericalHarmonics.sph_evaluate(ones(size(rho_LM[r,spin,:,:])))
     
-
+    rho = max.(rho, 1e-30)
+    
 #    println("xxxxxxxxxxxxxxxxxxxxxxxxx")
     #evaluate vxc in (theta phi) space
-    @time for l = 1:size(rho_LM)[3]
+    for l = 1:size(rho_LM)[3]
         for m = 1:size(rho_LM)[4]
             if nspin == 1
                 VLDA[:,1] = v_LDA.(rho[:,1,l,m])
@@ -1284,7 +1288,7 @@ function VXC_LM(rho_LM)
     end
 #    println("vlda tp ", vlda[1:3,1,1,1])
     #convert back to LM space
-    @time for r in 1:nr
+    for r in 1:nr
         for spin = 1:nspin
             vlda_lm[r,spin,:,:] = FastSphericalHarmonics.sph_transform(vlda[r,spin,:,:])
         end

@@ -11,7 +11,7 @@ real_gaunt_dict = Dict{NTuple{4,Int64}, Float64}()
 
 
 
-function construct_real_gaunt_indirect(; lmax=6)
+function construct_real_gaunt_indirect(; lmax=8)
 
     THETA, PHI = FastSphericalHarmonics.sph_points(lmax+1)
     Ytest = SphericalHarmonics.computeYlm(0.0, 0.0, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())

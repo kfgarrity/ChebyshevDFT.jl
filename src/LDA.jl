@@ -37,6 +37,7 @@ end
 
 function e_LDA_sp(n, ζ)
 
+    
 #    n=rho_up+rho_dn
     if n < 1e-60
         return 0.0
@@ -92,6 +93,7 @@ function e_LDA_sp(n, ζ)
 
     #print([2*ex, 2*ec])
     return (ex + 2.0*ec)  #2 for rydberg !?
+    #return (ex)
 end
 
 
