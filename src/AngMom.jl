@@ -11,7 +11,7 @@ real_gaunt_dict = Dict{NTuple{4,Int64}, Float64}()
 
 
 
-function construct_real_gaunt_indirect(; lmax=8)
+function construct_real_gaunt_indirect(; lmax=10)
 
     THETA, PHI = FastSphericalHarmonics.sph_points(lmax+1)
     Ytest = SphericalHarmonics.computeYlm(0.0, 0.0, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())
@@ -68,8 +68,8 @@ function fill_dict(; lmax=6)
             push!(T, (l1,l2))
         end
     end
-    
-    @threads for (l1,l2) in T
+
+    for (l1,l2) in T
         for l3 = 0:lmax
             for m1 = -l1:l1
                 for m2 = -l2:l2

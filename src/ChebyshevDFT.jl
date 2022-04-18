@@ -15,6 +15,7 @@ construct_real_gaunt_indirect()
 
 
 include("LDA.jl")
+include("UseLibxc.jl")
 include("Hartree.jl")
 include("SCF.jl")
 
