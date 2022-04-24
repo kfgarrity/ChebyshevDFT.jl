@@ -160,5 +160,13 @@ function smooth(x, thr1, thr2)
 
 end
 
+function smooth_f(f, r, thr, temp)
+
+    cut = findfirst(f  .< thr)
+    return f ./ (exp.( (r .- r[cut] ) / temp) .+ 1)
+
+end
+
+
 
 end #end module
