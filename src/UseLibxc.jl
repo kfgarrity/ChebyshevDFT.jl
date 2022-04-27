@@ -59,7 +59,21 @@ function EXC_sp(n, funlist, drho, gga)
     
 end
 
-function EXC(n, funlist, drho, gga, r, D1)
+function getVsigma(n, funlist, drho, r, theta)
+
+    sigma = drho[:,1].^2
+    sigma[2:end] += r[2:end].^(-2) .* ( drho[2:end,2].^2 + sin(theta)^(-2)* drho[2:end,3].^2)
+    v = zeros(length(n))
+    for fun in funlist
+        ret = evaluate(fun, rho=n, sigma=sigma)
+        v += ret.vsigma[:]
+    end    
+    return v
+    
+end
+
+
+function EXC(n, funlist, drho, ddrho, dvsigma, theta, gga, r, D1)
 
 #    println("EXC ", sum(abs.(drho)), " ", gga)
     
@@ -70,23 +84,46 @@ function EXC(n, funlist, drho, gga, r, D1)
 #        kf = (3*pi^2*n).^(1/3)
 #        sigma = ((drho./(2* kf .* n) ).^2)
     #    sigma = drho.^2
+
+        sigma = drho[:,1].^2
+        sigma[2:end] += r[2:end].^(-2) .* ( drho[2:end,2].^2 + sin(theta)^(-2)* drho[2:end,3].^2    )
+
     end
 
-    drho_s  = drho .* smooth(drho.^2, 1e-6, 1e-10)
-    sigma_s = drho_s.^2
+    #    drho_s  = drho 
+    #sigma_s = drho[:,1].^2 + drho[:,2].^2 + drho[:,3].^2
     
-    n_s = n #.* smooth(n, 1e-12, 1e-15)
+    n_s = n 
 
     for fun in funlist
         if gga
-            ret = evaluate(fun, rho=n_s, sigma=sigma_s )
+            ret = evaluate(fun, rho=n_s, sigma=sigma )
             vsigma = ret.vsigma[:] 
             
-            vrho = ret.vrho[:] #.* smooth(sigma_s, 1e-8, 1e-12)
+            vrho = ret.vrho
+
+            #1
+            v[2:end] += - 4.0 * r[2:end].^(-1) .*  ( ( vsigma[2:end] .* drho[2:end,1]))
+            v += -2.0*calc_D((vsigma .* drho[:,1])  , n, D1, r)
+
+            #2
+            v[2:end] +=  -2.0/sin(theta) * r[2:end].^(-2) .* (sin(theta) * dvsigma[2:end,2] .* drho[2:end, 2] + sin(theta) * vsigma[2:end] .* ddrho[2:end, 2] + cos(theta) * drho[2:end, 2] .* vsigma[2:end])
+
+            #3
+            v[2:end] +=  -2.0/sin(theta)^2 * r[2:end].^(-2) .* ( dvsigma[2:end,3] .* drho[2:end, 3] + vsigma[2:end] .* ddrho[2:end, 3])
+            
+            
+            #v += -2.0 /sin(theta) * vsigma .* (r.^(-1) .* ( cos(theta)  
+            
         else
             ret = evaluate(fun, rho=n)
+            vrho = ret.vrho
+            
         end            
 
+        v +=  vrho[:]
+
+        
         #        println(ret)
         #        println("size r ", size(r), " vs ", size(ret.vsigma))
 
@@ -97,20 +134,17 @@ function EXC(n, funlist, drho, gga, r, D1)
         #v +=  ret.vrho[:] - 4.0 * r.^(-1) .*  ret.vsigma[:] .* drho  - 2 * (D1*ret.vsigma').* (drho)
 
         #        v +=  ret.vrho[:] - 2.0 * r.^(-2) .*  (D1 * (r.^2 .* ret.vsigma[:] .* drho))
-        v +=  vrho[:]
-        v += - 4.0 * r.^(-1) .*  ( ( vsigma[:] .* drho_s))
-        v += -2*D1*(vsigma .* drho_s .* smooth(n_s, 5e-5, 1e-6) ) 
 
-        va[:,1] += drho
-        va[:,2] += drho_s
-        va[:,3] += n
-        va[:,4] += n_s
-        va[:,5] += ret.vsigma[:]
-        va[:,6] += vsigma
-        va[:,7] += ret.vrho[:]
-        va[:,8] += vrho
-        va[:,9] += -2*D1*(vsigma .* drho_s)
-        va[:,10] += -2*D1*(vsigma .* drho_s .* smooth(n_s, 5e-4, 1e-6) ) 
+#        va[:,1] += drho
+#        va[:,2] += drho_s
+#        va[:,3] += n
+#        va[:,4] += n_s
+#        va[:,5] += ret.vsigma[:]
+#        va[:,6] += vsigma
+#        va[:,7] += ret.vrho[:]
+#        va[:,8] += vrho
+#        va[:,9] += -2*D1*(vsigma .* drho_s)
+#        va[:,10] += calc_D(-2.0*(vsigma .* drho_s)  , n, D1, r) 
         
 #        va[:,1] += ret.vsigma[:]
 #        va[:,2] += drho
@@ -153,7 +187,7 @@ function smooth(x, thr1, thr2)
 
     a = log(thr1)
     b = log(thr2)
-    y = log.(x)
+    y = log.(abs.(x))
     t = (y .- b)/(a-b)
     
     return (y .>= a)*1.0 + (y .< a .&& y .> b) .* (0.0 .+ 10.0 * t.^3 .- 15.0 *  t.^4  .+ 6.0 * t.^5) 
@@ -165,6 +199,26 @@ function smooth_f(f, r, thr, temp)
     cut = findfirst(f  .< thr)
     return f ./ (exp.( (r .- r[cut] ) / temp) .+ 1)
 
+end
+
+function calc_D(f, rho, D1, r)
+
+#    thr1 = 5*10^-6
+#    thr2 = 5*10^-8
+    thr1 = 10^-5
+    thr2 = 10^-7
+    cutfn = smooth( rho, thr1, thr2)
+
+    dr_fd = zeros(size(f))
+
+    for i = 2:length(dr_fd)-1
+        dr_fd[i] = 0.5*(f[i]-f[i-1]) / (r[i] - r[i-1]) + 0.5*(f[i+1]-f[i]) / (r[i+1] - r[i])
+    end
+
+    Df = (D1*f) .* ( cutfn ) + dr_fd .* ( 1.0 .- cutfn )
+
+    return Df
+    
 end
 
 

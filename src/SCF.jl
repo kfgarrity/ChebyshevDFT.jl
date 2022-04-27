@@ -21,11 +21,13 @@ import Base.Threads.@spawn
 
 using SphericalHarmonics
 using FastSphericalHarmonics
+using SphericalHarmonicModes
 
 using ..UseLibxc:set_functional
 using ..UseLibxc:EXC
 using ..UseLibxc:EXC_sp
 using ..UseLibxc:smooth
+using ..UseLibxc:getVsigma
 
 include("Atomlist.jl")
 
@@ -1051,14 +1053,16 @@ function setup_filling(fill_str)
 end
 
 
-function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init = missing, niters=20, mix = 0.7, mixing_mode=:pulay, ax = 0.02, exc=missing)
+function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init = missing, niters=20, mix = 0.7, mixing_mode=:pulay, ax = 0.2, exc=missing, bx = 0.5)
 
     
     Z = Float64(Z)
     nel, nspin, lmax = setup_filling(fill_str)
     lmax_rho = min(lmax*2+4, 10)
 
-    lmax_rho = 0
+#    lmax_rho = 12
+    
+#    lmax_rho = 0
         
     if !ismissing(exc)
         funlist,gga = set_functional(exc, nspin=nspin)
@@ -1076,57 +1080,53 @@ function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_
 #    println("setup")
 
 
-#=    
-    function grid(x)
-        return log(x + ax)
+    begin
+        function grid(x)
+            return log(bx*x + ax)
+        end
+        
+        function grid1(x)
+            return bx/(bx*x+ax)
+        end
+        function grid2(x)
+            return -bx^2 / (bx*x+ax)^2
+        end
+
+        function invgrid(x)
+            return (exp(x) - ax)/bx
+        end
+        
+        function invgrid1(x)
+            return grid1(x).^-1
+        end
     end
 
-    function grid1(x)
-        return 1.0/(x+ax)
-    end
-    function grid2(x)
-        return -1.0 / (x+ax)^2
-    end
 
+#=    begin
+
+        println("linear grid")
+        function grid(x)
+            return x
+        end
+
+        function grid1(x)
+            return 1.0
+        end
+        function grid2(x)
+            return 0.0
+        end
+
+        function invgrid(x)
+            return x
+        end
+
+        function invgrid1(x)
+            return 1.0
+        end
+    end
+=#
     
-    
-    function invgrid(x)
-        return exp(x) - ax
-    end
-
-    function invgrid1(x)
-        return grid1(x).^-1
-    end
-    =#
-
-    function grid(x)
-        return x
-    end
-
-    function grid1(x)
-        return 1.0
-    end
-    function grid2(x)
-        return 0.0
-    end
-
-    
-#    function grid1(x)
-#        return ForwardDiff.derivative(grid, x)
-#    end
-#    function grid2(x)
-#        return ForwardDiff.derivative(grid1,x)
-#    end
-    
-    function invgrid(x)
-        return x
-    end
-
-    function invgrid1(x)
-        return 1.0
-    end
-
-    println("fakegrid")
+#    println("fakegrid")
     
     
     begin
@@ -1357,12 +1357,12 @@ function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_
 
         rho_new_LM, filling, rhor2, rhoR, rhoR2 = assemble_rho_LM(vals_r, vects, nel, rall_rs, wall, rho_LM, N, Rmax, D2Xgrid, D1Xgrid, nspin=nspin, lmax=lmax, ig1 = ig1, gga=true)
 
-        if true
+#        if true
             #                calc_drho(rho_new_LM, drho_LM, D1Xgrid, lmax)
             #calc_drho(rho_new_LM, drho_LM, D1Xgrid, lmax)
-            calc_drho3(rho_LM, drho_LM, D1Xgrid, lmax, rhoR, rall_rs)
+#            calc_drho3(rho_LM, drho_LM, D1Xgrid, lmax, rhoR, rall_rs)
             
-        end
+#        end
 
         
 #        println("size rho_new_LM ", size(rho_new_LM))
@@ -1379,11 +1379,8 @@ function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_
             println()
             println("eigval-based convergence reached ", abs(eigs_tot_old-eigs_tot_new))
             println()
-            if false
-                #                calc_drho(rho_new_LM, drho_LM, D1Xgrid, lmax)
-                #calc_drho(rho_new_LM, drho_LM, D1Xgrid, lmax)
-                calc_drho2(rho_LM, drho_LM, D1Xgrid, lmax, rhoR, rall_rs)
-                
+            if true
+                calc_drho3(rho_LM, drho_LM, D1Xgrid, lmax, rhoR, rall_rs)
             end
             break
         end
@@ -1414,9 +1411,7 @@ function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_
         rho_old_LM[:] = rho_LM[:]
 
         if gga
-#            println("drho before ", sum(abs.(drho_LM)))
-            calc_drho2(rho_LM, drho_LM, D1Xgrid, lmax, rall_rs)
-#            println("drho after ", sum(abs.(drho_LM)))            
+            calc_drho3(rho_LM, drho_LM, D1Xgrid, lmax, rhoR, rall_rs)
         end
 
         
@@ -1463,15 +1458,17 @@ end
 function calc_drho3(rho, drho, D1, lmax, rhoR, r)
     println("calc_drho3")
 
-    thr1 = 5*10^-6
-    thr2 = 5*10^-8
+
+    
+    thr1 = 10^-5
+    thr2 = 10^-7
     nspin = size(rho)[2]
     for spin = 1:nspin
         for ll = 0:(2*lmax)
             for mm = -ll:ll
                 d = FastSphericalHarmonics.sph_mode(ll,mm)
 
-                t = D1 * rhoR[:,spin,d[1], d[2]]
+                t = D1 * (rho[:,spin,d[1], d[2]] .* r)
 
                 dr_spect = zeros(size(t))
                 dr_spect[2:end] = (t[2:end] - rho[2:end,spin,d[1], d[2]]) ./ r[2:end]
@@ -1520,24 +1517,33 @@ function VXC_LM(rho_LM, drho_LM, r, D1; get_elm=false, funlist=missing, gga=fals
     #convert to real (theta phi) space
 #    println("convert")
 
-#    for r in 1:nr
-#        for spin = 1:nspin
-#            rho[r,spin,:,:] = FastSphericalHarmonics.sph_evaluate(rho_LM[r,spin,:,:])
-#        end
-#    end
 
+    rho_test = zeros(size(rho_LM))
+    for r in 1:nr
+        for spin = 1:nspin
+            rho_test[r,spin,:,:] = FastSphericalHarmonics.sph_evaluate(rho_LM[r,spin,:,:])
+        end
+    end
+
+
+    
     #rho2 = deepcopy(rho)
     #println("rho v2")
 
-    rho, drho = get_rho_rs(rho_LM, drho_LM, gga=gga) 
+    rho, drho, ddrho, vsigma, dvsigma,THETA,PHI = get_rho_rs(rho_LM, drho_LM, r, funlist, gga=gga) 
 
+#    println("1rho      ", rho[50:55, 1,1,1])
+#    println("1rho_test ", rho_test[50:55, 1,1,1])
+#    println()
+#    println("2rho      ", rho[50:55, 1,2,1])
+#    println("2rho_test ", rho_test[50:55, 1,2,1])
+#    println()
     #    println(rho2[1:5,1,1,1])
 #    println(rho[1:5,1,1,1])
     
     #test
     #test = FastSphericalHarmonics.sph_evaluate(ones(size(rho_LM[r,spin,:,:])))
 
-    drho[rho .< 0.0] .= 1e-30
     rho = max.(rho, 1e-30)
     va = zeros(1)
     
@@ -1550,7 +1556,7 @@ function VXC_LM(rho_LM, drho_LM, r, D1; get_elm=false, funlist=missing, gga=fals
 
 
                 if !ismissing(funlist)
-                    e,v,va = EXC( rho[:,1,l,m], funlist, drho[:,1,l,m], gga, r, D1)
+                    e,v,va = EXC( rho[:,1,l,m], funlist, drho[:,1,l,m,:], ddrho[:,1,l,m,:], dvsigma[:,1,l,m,:], THETA[l], gga, r, D1)
                     vlda[:,1,l, m] .= v
                     if get_elm
                         elda[:,l,m] .= e
@@ -1623,7 +1629,8 @@ function VXC_LM(rho_LM, drho_LM, r, D1; get_elm=false, funlist=missing, gga=fals
 end
 
 
-function get_rho_rs(rho_LM, drho_LM; gga=false)
+
+function get_rho_rs(rho_LM, drho_LM, r, funlist; gga=false)
 
     nspin = size(rho_LM)[2]
     nr = size(rho_LM)[1]
@@ -1632,37 +1639,185 @@ function get_rho_rs(rho_LM, drho_LM; gga=false)
     lmax = size(rho_LM)[3]-1
     THETA,PHI = FastSphericalHarmonics.sph_points(lmax+1)
 
-    nthreads()
-    rho_thr = zeros(nr, nspin, lmax+1, size(rho_LM)[4], nthreads())
-    drho_thr = zeros(nr, nspin, lmax+1, size(rho_LM)[4], nthreads())
 
+    rho_thr = zeros(nr, nspin, lmax+1, size(rho_LM)[4], nthreads())
+    drho_thr = zeros(nr, nspin, lmax+1, size(rho_LM)[4], 3, nthreads())
+    ddrho_thr = zeros(nr, nspin, lmax+1, size(rho_LM)[4], 3, nthreads())
+
+    
+    phi = 0.0
+    theta = 0.0
+
+    #this stuff is to compute derivatives of spherical harmonics. This could be cached.
+    begin
+        function ftheta(x)
+            SphericalHarmonics.computeYlm(x, phi, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())
+        end
+
+        function fphi(x)
+            SphericalHarmonics.computeYlm(theta, x, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())
+        end
+
+        dftheta = x-> ForwardDiff.derivative(ftheta, x)
+        dfphi = x-> ForwardDiff.derivative(fphi, x)
+
+        ddftheta = x-> ForwardDiff.derivative(dftheta, x)
+        ddfphi = x-> ForwardDiff.derivative(dfphi, x)
+        
+    end
+    
+    ml = SphericalHarmonicModes.ML(0:lmax, -lmax:lmax)
+    
+    
 #    println("size ", size(rho_LM), " " , size(drho_LM))
     
     #    @threads for (t,theta) in enumerate(THETA)
-    @threads for t in 1:length(THETA)
+
+    println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+
+    for t in 1:length(THETA)
         theta = THETA[t]
         id = threadid()
 
         for (p,phi) in enumerate(PHI) 
             Y = SphericalHarmonics.computeYlm(theta, phi, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())
 
+            if gga
+                dtheta = dftheta(theta)
+                dphi = dfphi(phi)
+
+                ddtheta = ddftheta(theta)
+                ddphi = ddfphi(phi)
+                
+            end
+
+
+            
             for spin = 1:nspin
                 for l = 0:lmax
                     for m = -l:l
                         d = FastSphericalHarmonics.sph_mode(l,m)
                         rho_thr[:,spin,t, p, id] += ( rho_LM[:,spin, d[1], d[2]]) * Y[(l,m)]
+##                        println("mode test ", Y[(l,m)], " " , Y[modeindex(ml, (l,m))])
                         if gga
-                            drho_thr[:,spin,t, p, id] += ( drho_LM[:,spin, d[1], d[2]]) * Y[(l,m)]
+
+                            drho_thr[:,spin,t, p,1, id] += ( drho_LM[:,spin, d[1], d[2]]) * Y[(l,m)]
+                            drho_thr[1:end,spin,t, p,2, id] +=   rho_LM[1:end,spin, d[1], d[2]] *  dtheta[modeindex(ml, (l,m))]
+                            drho_thr[1:end,spin,t, p,3, id] +=   rho_LM[1:end,spin, d[1], d[2]] *  dphi[modeindex(ml, (l,m))]
+
+                            ddrho_thr[1:end,spin,t, p,2, id] +=   rho_LM[1:end,spin, d[1], d[2]] *  ddtheta[modeindex(ml, (l,m))]
+                            ddrho_thr[1:end,spin,t, p,3, id] +=   rho_LM[1:end,spin, d[1], d[2]] *  ddphi[modeindex(ml, (l,m))]
                         end
                         
                     end
                 end
             end
+
         end
 
     end
-            
-    return sum(rho_thr, dims=5)[:,:,:,:,1], sum(drho_thr, dims=5)[:,:,:,:,1]
+    
+    rho = sum(rho_thr, dims=5)[:,:,:,:,1]
+    drho = sum(drho_thr, dims=6)[:,:,:,:,:,1]
+    ddrho = sum(ddrho_thr, dims=6)[:,:,:,:,:,1]
+
+
+    #figure out vsigma and derivatives wrt angle.
+    #current method is to evaluate vsigma in real (theta phi) space, transform to LM space, take the derivative, and then transform backwards.
+    
+    if gga
+
+        #real space
+        vsigma = zeros(nr, nspin, lmax+1, size(rho_LM)[4])
+        for t in 1:length(THETA)
+            theta = THETA[t]
+            for (p,phi) in enumerate(PHI) 
+                for spin = 1:nspin
+                    vsigma[:,spin, t,p] = getVsigma(rho[:,spin,t,p], funlist, drho[:,spin,t,p,:], r, theta)
+                end
+            end
+        end
+
+        #LM space
+        vsigma_lm = zeros(size(vsigma))
+#        rho_lm_test = zeros(size(vsigma))
+        for r in 1:nr
+            for spin = 1:nspin
+                vsigma_lm[r,spin,:,:] = FastSphericalHarmonics.sph_transform(@view vsigma[r,spin,:,:])
+#                rho_lm_test[r,spin,:,:] = FastSphericalHarmonics.sph_transform(@view rho[r,spin,:,:])
+            end
+        end
+
+#        println("vsigma_lm 50")
+#        println(vsigma_lm[30,1,:,:])
+#        println("rho_lm_test 50")
+#        println(rho_lm_test[30,1,:,:])
+        
+
+        # real space again
+        dvsigma = zeros(nr, nspin, lmax+1, size(rho_LM)[4], 3)
+#        vsigma_test = zeros(nr, nspin, lmax+1, size(rho_LM)[4])
+#        vsigma_test2 = zeros(nr, nspin, lmax+1, size(rho_LM)[4])
+
+#        rho_test = zeros(size(rho_lm_test))
+
+ #       for r in 1:nr
+ #           for spin = 1:nspin
+ #               vsigma_test2[r,spin,:,:] = FastSphericalHarmonics.sph_evaluate(vsigma_lm[r,spin,:,:])
+ #           end
+ #       end
+        
+        lmax = lmax + 2
+        ml = SphericalHarmonicModes.ML(0:lmax, -lmax:lmax)
+        for t in 1:length(THETA)
+            theta = THETA[t]
+            for (p,phi) in enumerate(PHI) 
+                Y = SphericalHarmonics.computeYlm(theta, phi, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())
+
+                dtheta = dftheta(theta)
+                dphi = dfphi(phi)
+                for spin = 1:nspin
+                    for l = 0:(lmax)
+                        for m = -l:l
+                            d = FastSphericalHarmonics.sph_mode(l,m)
+#                            dvsigma[1:end,spin,t, p,2] +=   vsigma_lm[1:end,spin, d[1], d[2]] *  dtheta[modeindex(ml, (l,m))]
+#                            dvsigma[1:end,spin,t, p,3] +=   vsigma_lm[1:end,spin, d[1], d[2]] *  dphi[modeindex(ml, (l,m))]
+                            if d[1] <= size(vsigma_lm)[3] && d[2] <= size(vsigma_lm)[4]
+
+                                dvsigma[1:end,spin,t, p,2] +=   0.5*vsigma_lm[1:end,spin, d[1], d[2]] *  dtheta[modeindex(ml, (l,m))]
+                                dvsigma[1:end,spin,t, p,3] +=   0.5*vsigma_lm[1:end,spin, d[1], d[2]] *  dphi[modeindex(ml, (l,m))]
+
+                                #                                vsigma_test[1:end,spin,t, p] +=   vsigma_lm[1:end,spin, d[1], d[2]] * Y[(l,m)]
+#                                rho_test[1:end, spin,t, p] +=   rho_lm_test[1:end,spin, d[1], d[2]] * Y[(l,m)]
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+#        println("1vsigma       ", vsigma[50:55, 1,1,1])
+#        println("1vsigma_test  ", vsigma_test[50:55,1,1,1])
+#        println("1vsigma_test2 ", vsigma_test2[50:55,1,1,1])
+#        println()
+#        d = FastSphericalHarmonics.sph_mode(1,0)
+#        println("2vsigma       ", vsigma[50:55, 1,d[1], d[2]])
+#        println("2vsigma_test  ", vsigma_test[50:55,1,d[1], d[2]])
+#        println("2vsigma_test2 ", vsigma_test2[50:55,1,d[1], d[2]])
+ #       println()
+
+#        println("rtest      ", rho[50:55, 1,d[1], d[2]])
+#        println("rtest_test ", rho_test[50:55, 1,d[1], d[2]])
+
+        
+        #        println("max abs diff vsigma ", maximum(abs.(vsigma - vsigma_test)))
+        
+    else
+        vsigma = zeros(1,1,1,1) #LDA placeholder
+        dvsigma = zeros(1,1,1,1,1)
+    end
+    
+    return rho, drho, ddrho, vsigma, dvsigma, THETA,PHI
 
 end
 
