@@ -1060,7 +1060,7 @@ function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_
     nel, nspin, lmax = setup_filling(fill_str)
     lmax_rho = min(lmax*2+4, 10)
 
-#    lmax_rho = 12
+    lmax_rho = 12
     
 #    lmax_rho = 0
         
@@ -1237,7 +1237,7 @@ function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_
         #        VLDA = diagm(v_LDA.(rho[2:N]))
         
         lda_task = @spawn begin
-            vlda_LM, elda_LM, va = VXC_LM(rho_LM *4*pi, 4*pi*drho_LM, rall_rs, funlist=funlist, D1Xgrid, gga=gga)
+            vlda_LM, elda_LM = VXC_LM(rho_LM *4*pi, 4*pi*drho_LM, rall_rs, funlist=funlist, D1Xgrid, gga=gga)
         end
         
         poisson_task = @spawn begin
@@ -1463,6 +1463,7 @@ function calc_drho3(rho, drho, D1, lmax, rhoR, r)
     thr1 = 10^-5
     thr2 = 10^-7
     nspin = size(rho)[2]
+    rho_t = sum(rho, dims=2)[:,1,:,:]
     for spin = 1:nspin
         for ll = 0:(2*lmax)
             for mm = -ll:ll
@@ -1476,14 +1477,14 @@ function calc_drho3(rho, drho, D1, lmax, rhoR, r)
 
                 dr_fd = zeros(size(t))
 
-                a = rho[:,spin, d[1], d[2]]
+                a = rho[:,spin,d[1], d[2]]
                 
                 for i = 2:length(dr_fd)-1
                     dr_fd[i] = 0.5*(a[i]-a[i-1]) / (r[i] - r[i-1]) + 0.5*(a[i+1]-a[i]) / (r[i+1] - r[i])
                 end
                 #                println("dr ", dr_fd[10:12])
 
-                cutfn = smooth( a, thr1, thr2)
+                cutfn = smooth( rho_t[:,d[1], d[2]] , thr1, thr2)
                 
                 drho[:,spin,d[1], d[2]] = dr_spect .* ( cutfn ) + dr_fd .* ( 1.0 .- cutfn )
 
@@ -1556,7 +1557,7 @@ function VXC_LM(rho_LM, drho_LM, r, D1; get_elm=false, funlist=missing, gga=fals
 
 
                 if !ismissing(funlist)
-                    e,v,va = EXC( rho[:,1,l,m], funlist, drho[:,1,l,m,:], ddrho[:,1,l,m,:], dvsigma[:,1,l,m,:], THETA[l], gga, r, D1)
+                    e,v = EXC( rho[:,1,l,m], funlist, drho[:,1,l,m,:], ddrho[:,1,l,m,:], dvsigma[:,1,l,m,:], THETA[l], gga, r, D1)
                     vlda[:,1,l, m] .= v
                     if get_elm
                         elda[:,l,m] .= e
@@ -1572,7 +1573,12 @@ function VXC_LM(rho_LM, drho_LM, r, D1; get_elm=false, funlist=missing, gga=fals
             elseif nspin == 2
 
                 if !ismissing(funlist)
-                    e,v = EXC_sp( rho[:,1:2,l,m], funlist, drho[:,1:2,l,m], gga)
+#                    e,v = EXC_sp( rho[:,1:2,l,m], funlist, drho[:,1:2,l,m], gga)
+                    if gga
+                        e,v = EXC_sp( rho[:,1:2,l,m], funlist, drho[:,1:2,l,m,:], ddrho[:,1:2,l,m,:], dvsigma[:,1:3,l,m,:], THETA[l], gga, r, D1)
+                    else
+                        e,v = EXC_sp( rho[:,1:2,l,m], funlist, missing, missing, missing, THETA[l], gga, r, D1)
+                    end                        
                     vlda[:,1,l, m] .= v[:,1]
                     vlda[:,2,l, m] .= v[:,2]
                     if get_elm
@@ -1622,7 +1628,7 @@ function VXC_LM(rho_LM, drho_LM, r, D1; get_elm=false, funlist=missing, gga=fals
 #    println("check v2 ", vlda_lm2[1:4,1,1, 1])
 
     
-    return vlda_lm, elda_lm, va
+    return vlda_lm, elda_lm
     
     
 
@@ -1728,26 +1734,34 @@ function get_rho_rs(rho_LM, drho_LM, r, funlist; gga=false)
     if gga
 
         #real space
-        vsigma = zeros(nr, nspin, lmax+1, size(rho_LM)[4])
+        if nspin == 2
+            vsigma = zeros(nr, 3, lmax+1, size(rho_LM)[4])
+        else
+            vsigma = zeros(nr, 1, lmax+1, size(rho_LM)[4])
+        end            
+
         for t in 1:length(THETA)
             theta = THETA[t]
             for (p,phi) in enumerate(PHI) 
-                for spin = 1:nspin
-                    vsigma[:,spin, t,p] = getVsigma(rho[:,spin,t,p], funlist, drho[:,spin,t,p,:], r, theta)
-                end
+                vsigma[:,:, t,p] = getVsigma(rho[:,:,t,p], funlist, drho[:,:,t,p,:], r, theta, nspin)
             end
         end
 
         #LM space
         vsigma_lm = zeros(size(vsigma))
 #        rho_lm_test = zeros(size(vsigma))
-        for r in 1:nr
-            for spin = 1:nspin
-                vsigma_lm[r,spin,:,:] = FastSphericalHarmonics.sph_transform(@view vsigma[r,spin,:,:])
-#                rho_lm_test[r,spin,:,:] = FastSphericalHarmonics.sph_transform(@view rho[r,spin,:,:])
+        if nspin == 1
+            for r in 1:nr
+                vsigma_lm[r,1,:,:] = FastSphericalHarmonics.sph_transform(@view vsigma[r,1,:,:])
             end
-        end
-
+        elseif nspin == 2
+            for r in 1:nr
+                vsigma_lm[r,1,:,:] = FastSphericalHarmonics.sph_transform(@view vsigma[r,1,:,:])
+                vsigma_lm[r,2,:,:] = FastSphericalHarmonics.sph_transform(@view vsigma[r,2,:,:])
+                vsigma_lm[r,3,:,:] = FastSphericalHarmonics.sph_transform(@view vsigma[r,3,:,:])
+            end
+        end            
+            
 #        println("vsigma_lm 50")
 #        println(vsigma_lm[30,1,:,:])
 #        println("rho_lm_test 50")
@@ -1755,8 +1769,14 @@ function get_rho_rs(rho_LM, drho_LM, r, funlist; gga=false)
         
 
         # real space again
-        dvsigma = zeros(nr, nspin, lmax+1, size(rho_LM)[4], 3)
-#        vsigma_test = zeros(nr, nspin, lmax+1, size(rho_LM)[4])
+
+        if nspin == 1
+            dvsigma = zeros(nr, 1, lmax+1, size(rho_LM)[4], 3)
+        elseif nspin == 2
+            dvsigma = zeros(nr, 3, lmax+1, size(rho_LM)[4], 3)
+        end
+        
+        #        vsigma_test = zeros(nr, nspin, lmax+1, size(rho_LM)[4])
 #        vsigma_test2 = zeros(nr, nspin, lmax+1, size(rho_LM)[4])
 
 #        rho_test = zeros(size(rho_lm_test))
@@ -1776,26 +1796,28 @@ function get_rho_rs(rho_LM, drho_LM, r, funlist; gga=false)
 
                 dtheta = dftheta(theta)
                 dphi = dfphi(phi)
-                for spin = 1:nspin
-                    for l = 0:(lmax)
-                        for m = -l:l
-                            d = FastSphericalHarmonics.sph_mode(l,m)
-#                            dvsigma[1:end,spin,t, p,2] +=   vsigma_lm[1:end,spin, d[1], d[2]] *  dtheta[modeindex(ml, (l,m))]
-#                            dvsigma[1:end,spin,t, p,3] +=   vsigma_lm[1:end,spin, d[1], d[2]] *  dphi[modeindex(ml, (l,m))]
-                            if d[1] <= size(vsigma_lm)[3] && d[2] <= size(vsigma_lm)[4]
-
-                                dvsigma[1:end,spin,t, p,2] +=   0.5*vsigma_lm[1:end,spin, d[1], d[2]] *  dtheta[modeindex(ml, (l,m))]
-                                dvsigma[1:end,spin,t, p,3] +=   0.5*vsigma_lm[1:end,spin, d[1], d[2]] *  dphi[modeindex(ml, (l,m))]
-
-                                #                                vsigma_test[1:end,spin,t, p] +=   vsigma_lm[1:end,spin, d[1], d[2]] * Y[(l,m)]
-#                                rho_test[1:end, spin,t, p] +=   rho_lm_test[1:end,spin, d[1], d[2]] * Y[(l,m)]
+                for l = 0:(lmax)
+                    for m = -l:l
+                        d = FastSphericalHarmonics.sph_mode(l,m)
+                        #                            dvsigma[1:end,spin,t, p,2] +=   vsigma_lm[1:end,spin, d[1], d[2]] *  dtheta[modeindex(ml, (l,m))]
+                        #                            dvsigma[1:end,spin,t, p,3] +=   vsigma_lm[1:end,spin, d[1], d[2]] *  dphi[modeindex(ml, (l,m))]
+                        if d[1] <= size(vsigma_lm)[3] && d[2] <= size(vsigma_lm)[4]
+                            
+                            if nspin == 1
+                                dvsigma[1:end,1,t, p,2] +=   0.5*vsigma_lm[1:end,1, d[1], d[2]] *  dtheta[modeindex(ml, (l,m))]
+                                dvsigma[1:end,1,t, p,3] +=   0.5*vsigma_lm[1:end,1, d[1], d[2]] *  dphi[modeindex(ml, (l,m))]
+                            elseif nspin == 2
+                                for ii = 1:3
+                                    dvsigma[1:end,ii,t, p,2] +=   0.5*vsigma_lm[1:end,ii, d[1], d[2]] *  dtheta[modeindex(ml, (l,m))]
+                                    dvsigma[1:end,ii,t, p,3] +=   0.5*vsigma_lm[1:end,ii, d[1], d[2]] *  dphi[modeindex(ml, (l,m))]
+                                end
                             end
                         end
                     end
                 end
             end
         end
-
+        
 #        println("1vsigma       ", vsigma[50:55, 1,1,1])
 #        println("1vsigma_test  ", vsigma_test[50:55,1,1,1])
 #        println("1vsigma_test2 ", vsigma_test2[50:55,1,1,1])

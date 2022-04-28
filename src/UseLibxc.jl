@@ -32,26 +32,70 @@ function set_functional(exc_list; nspin=1)
 end
 
 
-function EXC_sp(n, funlist, drho, gga)
+function EXC_sp(n, funlist, drho, ddrho, dvsigma, theta, gga,  r, D1)
 
     v = zeros(length(n[:,1]), 2)
     e = zeros(length(n[:,1]))
+
+
+    
     if gga
-        sigma = zeros(length(n[:,1]), 3)
-        sigma[:,1] = drho[:,1].^2
-        sigma[:,3] = drho[:,2].^2
-        sigma[:,2] = drho[:,1] .* drho[:,2]
-        sig = collect(sigma')
+#        sigma = zeros(length(n[:,1]), 3)
+#        sigma[:,1] = drho[:,1].^2
+#        sigma[:,3] = drho[:,2].^2
+        #        sigma[:,2] = drho[:,1] .* drho[:,2]
+        sigma = zeros(3,length(drho[:,1,1]))
+        
+        sigma[1,:] = drho[:,1,1].^2
+        sigma[3,:] = drho[:,2,1].^2
+        sigma[2,:] = drho[:,1,1].*drho[:,2,1]
+
+        sigma[1 ,2:end] += r[2:end].^(-2) .* ( drho[2:end,1,2].^2               + sin(theta)^(-2)* drho[2:end,1,3].^2)
+        sigma[2, 2:end] += r[2:end].^(-2) .* ( drho[2:end,2,2].^2               + sin(theta)^(-2)* drho[2:end,2,3].^2)
+        sigma[3, 2:end] += r[2:end].^(-2) .* ( drho[2:end,1,2].*drho[2:end,2,2] + sin(theta)^(-2)* drho[2:end,1,3].*drho[2:end,2,3])
+        
     end
 
     rho = collect(n')
     for fun in funlist
 
         if gga
-            ret = evaluate(fun, rho=rho, sigma=sig)
+            ret = evaluate(fun, rho=rho, sigma=sigma)
         else
             ret = evaluate(fun, rho=rho)
         end            
+
+        if gga
+            vsigma = ret.vsigma' 
+            
+            vrho = ret.vrho
+
+            #1
+            v[2:end,1] += - 4.0 * r[2:end].^(-1) .*  ( vsigma[2:end,1] .* drho[2:end,1,1] + 0.5* drho[2:end,2,1].*vsigma[2:end,2])
+            v[2:end,2] += - 4.0 * r[2:end].^(-1) .*  ( vsigma[2:end,3] .* drho[2:end,2,1] + 0.5* drho[2:end,1,1].*vsigma[2:end,2])
+
+            v[:,1] += -2.0*calc_D( vsigma[:,1] .* drho[:,1,1] + 0.5*vsigma[:,2] .* drho[:,2,1]   , n[:,1]+n[:,2], D1, r)
+            v[:,2] += -2.0*calc_D( vsigma[:,3] .* drho[:,2,1] + 0.5*vsigma[:,2] .* drho[:,1,1]   , n[:,1]+n[:,2], D1, r)
+
+
+            #2
+            v[2:end,1] +=  -2.0/sin(theta) * r[2:end].^(-2) .* (sin(theta) * dvsigma[2:end,1, 2] .* drho[2:end,1, 2] + sin(theta) * vsigma[2:end,1] .* ddrho[2:end,1,2] + cos(theta) * drho[2:end,1, 2] .* vsigma[2:end,1])
+            v[2:end,1] +=  -1.0/sin(theta) * r[2:end].^(-2) .* (sin(theta) * dvsigma[2:end,2, 2] .* drho[2:end,2, 2] + sin(theta) * vsigma[2:end,2] .* ddrho[2:end,2,2] + cos(theta) * drho[2:end,2, 2] .* vsigma[2:end,2])
+
+            v[2:end,2] +=  -2.0/sin(theta) * r[2:end].^(-2) .* (sin(theta) * dvsigma[2:end,3, 2] .* drho[2:end,2, 2] + sin(theta) * vsigma[2:end,3] .* ddrho[2:end,2,2] + cos(theta) * drho[2:end,2, 2] .* vsigma[2:end,3])
+            v[2:end,2] +=  -1.0/sin(theta) * r[2:end].^(-2) .* (sin(theta) * dvsigma[2:end,2, 2] .* drho[2:end,1, 2] + sin(theta) * vsigma[2:end,2] .* ddrho[2:end,1,2] + cos(theta) * drho[2:end,1, 2] .* vsigma[2:end,2])
+            
+
+            
+            #3
+            
+            v[2:end,1] +=  -2.0/sin(theta)^2 * r[2:end].^(-2) .* ( dvsigma[2:end,1,3] .* drho[2:end,1, 3] + vsigma[2:end,1] .* ddrho[2:end,1, 3])
+            v[2:end,1] +=  -1.0/sin(theta)^2 * r[2:end].^(-2) .* ( dvsigma[2:end,2,3] .* drho[2:end,2, 3] + vsigma[2:end,2] .* ddrho[2:end,2, 3])
+
+            v[2:end,2] +=  -2.0/sin(theta)^2 * r[2:end].^(-2) .* ( dvsigma[2:end,3,3] .* drho[2:end,2, 3] + vsigma[2:end,3] .* ddrho[2:end,2, 3])
+            v[2:end,2] +=  -1.0/sin(theta)^2 * r[2:end].^(-2) .* ( dvsigma[2:end,2,3] .* drho[2:end,1, 3] + vsigma[2:end,2] .* ddrho[2:end,1, 3])
+        end        
+        
         v[:,:] .+= ret.vrho'
         e .+= ret.zk
     end
@@ -59,16 +103,39 @@ function EXC_sp(n, funlist, drho, gga)
     
 end
 
-function getVsigma(n, funlist, drho, r, theta)
+function getVsigma(n, funlist, drho, r, theta, nspin)
 
-    sigma = drho[:,1].^2
-    sigma[2:end] += r[2:end].^(-2) .* ( drho[2:end,2].^2 + sin(theta)^(-2)* drho[2:end,3].^2)
-    v = zeros(length(n))
-    for fun in funlist
-        ret = evaluate(fun, rho=n, sigma=sigma)
-        v += ret.vsigma[:]
-    end    
-    return v
+    if nspin == 1
+        sigma = drho[:,1,1].^2
+        sigma[2:end] += r[2:end].^(-2) .* ( drho[2:end,1,2].^2 + sin(theta)^(-2)* drho[2:end,1,3].^2)
+        v = zeros(length(n))
+        for fun in funlist
+            ret = evaluate(fun, rho=n[:,1], sigma=sigma)
+            v += ret.vsigma[:]
+        end    
+        return v
+    elseif nspin == 2
+
+        sigma = zeros(3,length(drho[:,1,1]))
+        
+        sigma[1,:] = drho[:,1,1].^2
+        sigma[3,:] = drho[:,2,1].^2
+        sigma[2,:] = drho[:,1,1].*drho[:,2,1]
+
+        sigma[1,2:end] += r[2:end].^(-2) .* ( drho[2:end,1,2].^2               + sin(theta)^(-2)* drho[2:end,1,3].^2)
+        sigma[3,2:end] += r[2:end].^(-2) .* ( drho[2:end,2,2].^2               + sin(theta)^(-2)* drho[2:end,2,3].^2)
+        sigma[2,2:end] += r[2:end].^(-2) .* ( drho[2:end,1,2].*drho[2:end,2,2] + sin(theta)^(-2)* drho[2:end,1,3].*drho[2:end,2,3])
+
+        v = zeros(length(n[:,1]),3)
+        for fun in funlist
+            ret = evaluate(fun, rho=collect(n'), sigma=sigma)
+            v += ret.vsigma'
+        end    
+        return v
+
+
+    end
+        
     
 end
 
@@ -78,8 +145,8 @@ function EXC(n, funlist, drho, ddrho, dvsigma, theta, gga, r, D1)
 #    println("EXC ", sum(abs.(drho)), " ", gga)
     
     v = zeros(length(n))
-    va = zeros(length(n),10)
     e = zeros(length(n))
+
     if gga
 #        kf = (3*pi^2*n).^(1/3)
 #        sigma = ((drho./(2* kf .* n) ).^2)
@@ -93,11 +160,9 @@ function EXC(n, funlist, drho, ddrho, dvsigma, theta, gga, r, D1)
     #    drho_s  = drho 
     #sigma_s = drho[:,1].^2 + drho[:,2].^2 + drho[:,3].^2
     
-    n_s = n 
-
     for fun in funlist
         if gga
-            ret = evaluate(fun, rho=n_s, sigma=sigma )
+            ret = evaluate(fun, rho=n, sigma=sigma )
             vsigma = ret.vsigma[:] 
             
             vrho = ret.vrho
@@ -179,7 +244,7 @@ function EXC(n, funlist, drho, ddrho, dvsigma, theta, gga, r, D1)
         e += ret.zk[:]
     end
     
-    return 2.0*e,v, va
+    return 2.0*e,v
     
 end
 
