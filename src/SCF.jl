@@ -16,6 +16,12 @@ using ..Hartree:V_H3
 
 using ..AngMom:gaunt
 using ..AngMom:real_gaunt_dict
+using ..AngMom:Y_dict
+using ..AngMom:Ytheta_dict
+using ..AngMom:Yphi_dict
+using ..AngMom:Ytheta2_dict
+using ..AngMom:Yphi2_dict
+
 using Base.Threads
 import Base.Threads.@spawn
 
@@ -1060,7 +1066,9 @@ function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_
     nel, nspin, lmax = setup_filling(fill_str)
     lmax_rho = min(lmax*2+4, 10)
 
-    lmax_rho = 12
+    lmax_rho = 6
+    #lmax_rho = 8
+    #lmax_rho = 12
     
 #    lmax_rho = 0
         
@@ -1236,11 +1244,12 @@ function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_
         println()
         #        VLDA = diagm(v_LDA.(rho[2:N]))
         
-        lda_task = @spawn begin
+        
+        lda_task = @spawn  begin
             vlda_LM, elda_LM = VXC_LM(rho_LM *4*pi, 4*pi*drho_LM, rall_rs, funlist=funlist, D1Xgrid, gga=gga)
         end
-        
-        poisson_task = @spawn begin
+
+        poisson_task = @spawn         begin
             #rho_tot = sum(rho, dims=2)
             for (spin,l,m) in spin_lm_rho
                 if spin == 2
@@ -1375,7 +1384,8 @@ function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_
 #        println("filling ", filling)
 
         eigs_tot_new = sum(filling.*vals_r)
-        if iter > 1 && abs(eigs_tot_old-eigs_tot_new) < 1e-9
+        println("conv check ", abs(eigs_tot_old-eigs_tot_new))
+        if iter > 1 && abs(eigs_tot_old-eigs_tot_new) < 1e-6
             println()
             println("eigval-based convergence reached ", abs(eigs_tot_old-eigs_tot_new))
             println()
@@ -1519,19 +1529,20 @@ function VXC_LM(rho_LM, drho_LM, r, D1; get_elm=false, funlist=missing, gga=fals
 #    println("convert")
 
 
-    rho_test = zeros(size(rho_LM))
-    for r in 1:nr
-        for spin = 1:nspin
-            rho_test[r,spin,:,:] = FastSphericalHarmonics.sph_evaluate(rho_LM[r,spin,:,:])
-        end
-    end
+#    rho_test = zeros(size(rho_LM))
+#    for r in 1:nr
+#        for spin = 1:nspin
+#            rho_test[r,spin,:,:] = FastSphericalHarmonics.sph_evaluate(rho_LM[r,spin,:,:])
+#        end
+#    end
 
 
     
     #rho2 = deepcopy(rho)
-    #println("rho v2")
 
-    rho, drho, ddrho, vsigma, dvsigma,THETA,PHI = get_rho_rs(rho_LM, drho_LM, r, funlist, gga=gga) 
+    println("get rho")
+
+    @time rho, drho, ddrho, vsigma, dvsigma,THETA,PHI = get_rho_rs(rho_LM, drho_LM, r, funlist, gga=gga) 
 
 #    println("1rho      ", rho[50:55, 1,1,1])
 #    println("1rho_test ", rho_test[50:55, 1,1,1])
@@ -1550,14 +1561,15 @@ function VXC_LM(rho_LM, drho_LM, r, D1; get_elm=false, funlist=missing, gga=fals
     
 #    println("xxxxxxxxxxxxxxxxxxxxxxxxx")
     #evaluate vxc in (theta phi) space
-    #println("eval")
-    for l = 1:size(rho_LM)[3]
+    println("eval")
+    @time for l = 1:size(rho_LM)[3]
         for m = 1:size(rho_LM)[4]
+        
             if nspin == 1
 
 
                 if !ismissing(funlist)
-                    e,v = EXC( rho[:,1,l,m], funlist, drho[:,1,l,m,:], ddrho[:,1,l,m,:], dvsigma[:,1,l,m,:], THETA[l], gga, r, D1)
+                    e,v = EXC( (@view rho[:,1,l,m]), funlist, (@view drho[:,1,l,m,:]), (@view ddrho[:,1,l,m,:]), (@view dvsigma[:,1,l,m,:]), THETA[l], gga, r, D1)
                     vlda[:,1,l, m] .= v
                     if get_elm
                         elda[:,l,m] .= e
@@ -1575,9 +1587,9 @@ function VXC_LM(rho_LM, drho_LM, r, D1; get_elm=false, funlist=missing, gga=fals
                 if !ismissing(funlist)
 #                    e,v = EXC_sp( rho[:,1:2,l,m], funlist, drho[:,1:2,l,m], gga)
                     if gga
-                        e,v = EXC_sp( rho[:,1:2,l,m], funlist, drho[:,1:2,l,m,:], ddrho[:,1:2,l,m,:], dvsigma[:,1:3,l,m,:], THETA[l], gga, r, D1)
+                        e,v = EXC_sp( (@view rho[:,1:2,l,m]), funlist, (@view drho[:,1:2,l,m,:]), (@view ddrho[:,1:2,l,m,:]), (@view dvsigma[:,1:3,l,m,:]), THETA[l], gga, r, D1)
                     else
-                        e,v = EXC_sp( rho[:,1:2,l,m], funlist, missing, missing, missing, THETA[l], gga, r, D1)
+                        e,v = EXC_sp( (@view rho[:,1:2,l,m]), funlist, missing, missing, missing, THETA[l], gga, r, D1)
                     end                        
                     vlda[:,1,l, m] .= v[:,1]
                     vlda[:,2,l, m] .= v[:,2]
@@ -1603,13 +1615,13 @@ function VXC_LM(rho_LM, drho_LM, r, D1; get_elm=false, funlist=missing, gga=fals
     end
 #    println("vlda tp ", vlda[1:3,1,1,1])
     #convert back to LM space
-#    println("transform")
+    println("transform")
     
-    for r in 1:nr
+    @time for r in 1:nr
         for spin = 1:nspin
-            vlda_lm[r,spin,:,:] = FastSphericalHarmonics.sph_transform((@view vlda[r,spin,:,:]))
+            vlda_lm[r,spin,:,:] = FastSphericalHarmonics.sph_transform(( vlda[r,spin,:,:]))
             if get_elm && spin == 1
-                elda_lm[r,:,:] = FastSphericalHarmonics.sph_transform((@view elda[r,:,:]))
+                elda_lm[r,:,:] = FastSphericalHarmonics.sph_transform(( elda[r,:,:]))
             end
                 
         end
@@ -1655,8 +1667,9 @@ function get_rho_rs(rho_LM, drho_LM, r, funlist; gga=false)
     theta = 0.0
 
     #this stuff is to compute derivatives of spherical harmonics. This could be cached.
-    begin
-        function ftheta(x)
+    println("begin")
+    @time begin
+#=        function ftheta(x)
             SphericalHarmonics.computeYlm(x, phi, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())
         end
 
@@ -1669,10 +1682,10 @@ function get_rho_rs(rho_LM, drho_LM, r, funlist; gga=false)
 
         ddftheta = x-> ForwardDiff.derivative(dftheta, x)
         ddfphi = x-> ForwardDiff.derivative(dfphi, x)
-        
+  =#      
     end
     
-    ml = SphericalHarmonicModes.ML(0:lmax, -lmax:lmax)
+#    ml = SphericalHarmonicModes.ML(0:lmax, -lmax:lmax)
     
     
 #    println("size ", size(rho_LM), " " , size(drho_LM))
@@ -1681,46 +1694,66 @@ function get_rho_rs(rho_LM, drho_LM, r, funlist; gga=false)
 
     println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
 
-    for t in 1:length(THETA)
+    @time @threads for t in 1:length(THETA)
         theta = THETA[t]
         id = threadid()
 
+        #for p in [1]
         for (p,phi) in enumerate(PHI) 
-            Y = SphericalHarmonics.computeYlm(theta, phi, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())
 
-            if gga
-                dtheta = dftheta(theta)
-                dphi = dfphi(phi)
+            #            Y = SphericalHarmonics.computeYlm(theta, phi, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())
+            #
+#            if gga
+#                dtheta = dftheta(theta)
+#                dphi = dfphi(phi)#
 
-                ddtheta = ddftheta(theta)
-                ddphi = ddfphi(phi)
+#                ddtheta = ddftheta(theta)
+#                ddphi = ddfphi(phi)
                 
-            end
+#            end
 
 
             
             for spin = 1:nspin
                 for l = 0:lmax
-                    for m = -l:l
+                    #                    for m = -l:l
+                    for m = [0]
                         d = FastSphericalHarmonics.sph_mode(l,m)
-                        rho_thr[:,spin,t, p, id] += ( rho_LM[:,spin, d[1], d[2]]) * Y[(l,m)]
-##                        println("mode test ", Y[(l,m)], " " , Y[modeindex(ml, (l,m))])
-                        if gga
+                        #                        rho_thr[:,spin,t, p, id] += ( rho_LM[:,spin, d[1], d[2]]) * Y[(l,m)]
+                        rho_thr[:,spin,t, p, id] += (@view rho_LM[:,spin, d[1], d[2]]) * Y_dict[(lmax, t,p,l,m)]
 
-                            drho_thr[:,spin,t, p,1, id] += ( drho_LM[:,spin, d[1], d[2]]) * Y[(l,m)]
-                            drho_thr[1:end,spin,t, p,2, id] +=   rho_LM[1:end,spin, d[1], d[2]] *  dtheta[modeindex(ml, (l,m))]
-                            drho_thr[1:end,spin,t, p,3, id] +=   rho_LM[1:end,spin, d[1], d[2]] *  dphi[modeindex(ml, (l,m))]
+                        #if abs(Y_dict[(lmax, t,p,l,m)] - Y[(l,m)]) > 1e-8
+                        #    println("ERRR $lmax $t $p $l $m ", Y_dict[(lmax, t,p,l,m)], " " , Y[(l,m)])
+                        #end
+                        #if abs(Ytheta2_dict[(lmax, t,p,l,m)] - ddtheta[modeindex(ml, (l,m))] ) > 1e-8
+                        #    println("ERRRTHETA $lmax $t $p $l $m ", Ytheta2_dict[(lmax, t,p,l,m)], " " , ddtheta[modeindex(ml, (l,m))])
+                        #end
+                        
+                        ##                        println("mode test ", Y[(l,m)], " " , Y[modeindex(ml, (l,m))])
 
-                            ddrho_thr[1:end,spin,t, p,2, id] +=   rho_LM[1:end,spin, d[1], d[2]] *  ddtheta[modeindex(ml, (l,m))]
-                            ddrho_thr[1:end,spin,t, p,3, id] +=   rho_LM[1:end,spin, d[1], d[2]] *  ddphi[modeindex(ml, (l,m))]
+                        if true
+
+                            drho_thr[:,spin,t, p,1, id] += ( @view drho_LM[:,spin, d[1], d[2]]) * Y_dict[(lmax, t,p,l,m)]
+                            drho_thr[:,spin,t, p,2, id] += ( @view rho_LM[:,spin, d[1], d[2]]) *  Ytheta_dict[(lmax, t,p,l,m)]
+                            drho_thr[:,spin,t, p,3, id] += ( @view rho_LM[:,spin, d[1], d[2]]) *  Yphi_dict[(lmax, t,p,l,m)]
+
+                            ddrho_thr[:,spin,t, p,2, id] += ( @view  rho_LM[:,spin, d[1], d[2]]) *  Ytheta2_dict[(lmax,t,p,l,m)]
+                            ddrho_thr[:,spin,t, p,3, id] += ( @view  rho_LM[:,spin, d[1], d[2]]) *  Yphi2_dict[(lmax,t,p,l,m)]
+
+                            #                            drho_thr[:,spin,t, p,1, id] += ( drho_LM[:,spin, d[1], d[2]]) * Y[(l,m)]
+#                            drho_thr[1:end,spin,t, p,2, id] +=   rho_LM[1:end,spin, d[1], d[2]] *  dtheta[modeindex(ml, (l,m))]
+#                            drho_thr[1:end,spin,t, p,3, id] +=   rho_LM[1:end,spin, d[1], d[2]] *  dphi[modeindex(ml, (l,m))]
+
+#                            ddrho_thr[1:end,spin,t, p,2, id] +=   rho_LM[1:end,spin, d[1], d[2]] *  ddtheta[modeindex(ml, (l,m))]
+#                            ddrho_thr[1:end,spin,t, p,3, id] +=   rho_LM[1:end,spin, d[1], d[2]] *  ddphi[modeindex(ml, (l,m))]
                         end
                         
                     end
                 end
             end
-
+            
         end
-
+        
     end
     
     rho = sum(rho_thr, dims=5)[:,:,:,:,1]
@@ -1730,7 +1763,8 @@ function get_rho_rs(rho_LM, drho_LM, r, funlist; gga=false)
 
     #figure out vsigma and derivatives wrt angle.
     #current method is to evaluate vsigma in real (theta phi) space, transform to LM space, take the derivative, and then transform backwards.
-    
+
+    #println("if gga")
     if gga
 
         #real space
@@ -1740,27 +1774,33 @@ function get_rho_rs(rho_LM, drho_LM, r, funlist; gga=false)
             vsigma = zeros(nr, 1, lmax+1, size(rho_LM)[4])
         end            
 
-        for t in 1:length(THETA)
+        println("getVsigma")
+        @time @threads for t in 1:length(THETA)
             theta = THETA[t]
             for (p,phi) in enumerate(PHI) 
-                vsigma[:,:, t,p] = getVsigma(rho[:,:,t,p], funlist, drho[:,:,t,p,:], r, theta, nspin)
+                vsigma[:,:, t,p] = getVsigma( (@view rho[:,:,t,p]), funlist, (@view drho[:,:,t,p,:]), r, theta, nspin)
             end
         end
 
         #LM space
         vsigma_lm = zeros(size(vsigma))
 #        rho_lm_test = zeros(size(vsigma))
-        if nspin == 1
-            for r in 1:nr
-                vsigma_lm[r,1,:,:] = FastSphericalHarmonics.sph_transform(@view vsigma[r,1,:,:])
+
+        println("LM space")
+        @time begin
+            if nspin == 1
+                for r in 1:nr
+                    vsigma_lm[r,1,:,:] .= FastSphericalHarmonics.sph_transform( vsigma[r,1,:,:])
+                end
+            elseif nspin == 2
+                for r in 1:nr
+                    vsigma_lm[r,1,:,:] .= FastSphericalHarmonics.sph_transform( vsigma[r,1,:,:])
+                    vsigma_lm[r,2,:,:] .= FastSphericalHarmonics.sph_transform( vsigma[r,2,:,:])
+                    vsigma_lm[r,3,:,:] .= FastSphericalHarmonics.sph_transform( vsigma[r,3,:,:])
+                end
             end
-        elseif nspin == 2
-            for r in 1:nr
-                vsigma_lm[r,1,:,:] = FastSphericalHarmonics.sph_transform(@view vsigma[r,1,:,:])
-                vsigma_lm[r,2,:,:] = FastSphericalHarmonics.sph_transform(@view vsigma[r,2,:,:])
-                vsigma_lm[r,3,:,:] = FastSphericalHarmonics.sph_transform(@view vsigma[r,3,:,:])
-            end
-        end            
+        end
+        
             
 #        println("vsigma_lm 50")
 #        println(vsigma_lm[30,1,:,:])
@@ -1771,9 +1811,9 @@ function get_rho_rs(rho_LM, drho_LM, r, funlist; gga=false)
         # real space again
 
         if nspin == 1
-            dvsigma = zeros(nr, 1, lmax+1, size(rho_LM)[4], 3)
+            dvsigma_thr = zeros(nr, 1, lmax+1, size(rho_LM)[4], 3, nthreads())
         elseif nspin == 2
-            dvsigma = zeros(nr, 3, lmax+1, size(rho_LM)[4], 3)
+            dvsigma_thr = zeros(nr, 3, lmax+1, size(rho_LM)[4], 3, nthreads())
         end
         
         #        vsigma_test = zeros(nr, nspin, lmax+1, size(rho_LM)[4])
@@ -1787,36 +1827,40 @@ function get_rho_rs(rho_LM, drho_LM, r, funlist; gga=false)
  #           end
  #       end
         
-        lmax = lmax + 2
+        lmax = lmax 
         ml = SphericalHarmonicModes.ML(0:lmax, -lmax:lmax)
-        for t in 1:length(THETA)
-            theta = THETA[t]
-            for (p,phi) in enumerate(PHI) 
-                Y = SphericalHarmonics.computeYlm(theta, phi, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())
+        println("realspace again")
+        @time @threads for t in 1:length(THETA)
+            id = threadid()
 
-                dtheta = dftheta(theta)
-                dphi = dfphi(phi)
+            for (p,phi) in enumerate(PHI) 
+#                Y = SphericalHarmonics.computeYlm(theta, phi, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())
+
+#                dtheta = dftheta(theta)
+#                dphi = dfphi(phi)
                 for l = 0:(lmax)
-                    for m = -l:l
+                    #                    for m = -l:l
+                    for m = [0]
                         d = FastSphericalHarmonics.sph_mode(l,m)
                         #                            dvsigma[1:end,spin,t, p,2] +=   vsigma_lm[1:end,spin, d[1], d[2]] *  dtheta[modeindex(ml, (l,m))]
                         #                            dvsigma[1:end,spin,t, p,3] +=   vsigma_lm[1:end,spin, d[1], d[2]] *  dphi[modeindex(ml, (l,m))]
-                        if d[1] <= size(vsigma_lm)[3] && d[2] <= size(vsigma_lm)[4]
+#                        if d[1] <= size(vsigma_lm)[3] && d[2] <= size(vsigma_lm)[4]
                             
                             if nspin == 1
-                                dvsigma[1:end,1,t, p,2] +=   0.5*vsigma_lm[1:end,1, d[1], d[2]] *  dtheta[modeindex(ml, (l,m))]
-                                dvsigma[1:end,1,t, p,3] +=   0.5*vsigma_lm[1:end,1, d[1], d[2]] *  dphi[modeindex(ml, (l,m))]
+                                dvsigma_thr[:,1,t, p,2,id] +=   0.5*( vsigma_lm[:,1, d[1], d[2]]) * Ytheta_dict[(lmax, t,p,l,m)] #dtheta[modeindex(ml, (l,m))]
+                                dvsigma_thr[:,1,t, p,3,id] +=   0.5*( vsigma_lm[:,1, d[1], d[2]]) * Yphi_dict[(lmax, t,p,l,m)] #dphi[modeindex(ml, (l,m))]
                             elseif nspin == 2
                                 for ii = 1:3
-                                    dvsigma[1:end,ii,t, p,2] +=   0.5*vsigma_lm[1:end,ii, d[1], d[2]] *  dtheta[modeindex(ml, (l,m))]
-                                    dvsigma[1:end,ii,t, p,3] +=   0.5*vsigma_lm[1:end,ii, d[1], d[2]] *  dphi[modeindex(ml, (l,m))]
+                                    dvsigma_thr[:,ii,t, p,2,id] +=   0.5*( vsigma_lm[:,ii, d[1], d[2]]) * Ytheta_dict[(lmax, t,p,l,m)]# dtheta[modeindex(ml, (l,m))]
+                                    dvsigma_thr[:,ii,t, p,3,id] +=   0.5*( vsigma_lm[:,ii, d[1], d[2]]) * Yphi_dict[(lmax, t,p,l,m)]# dphi[modeindex(ml, (l,m))]
                                 end
                             end
                         end
-                    end
+ #                   end
                 end
             end
         end
+        dvsigma = sum(dvsigma_thr, dims=6)[:,:,:,:,:,1]
         
 #        println("1vsigma       ", vsigma[50:55, 1,1,1])
 #        println("1vsigma_test  ", vsigma_test[50:55,1,1,1])

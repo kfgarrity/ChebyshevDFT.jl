@@ -162,7 +162,9 @@ function EXC(n, funlist, drho, ddrho, dvsigma, theta, gga, r, D1)
     
     for fun in funlist
         if gga
-            ret = evaluate(fun, rho=n, sigma=sigma )
+#            println("$fun ")
+#            println(typeof(n), " " , typeof(sigma))
+            ret = evaluate(fun, rho=collect(n), sigma=sigma )
             vsigma = ret.vsigma[:] 
             
             vrho = ret.vrho
