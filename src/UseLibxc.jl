@@ -183,7 +183,7 @@ function EXC(n, funlist, drho, ddrho, dvsigma, theta, gga, r, D1)
             #v += -2.0 /sin(theta) * vsigma .* (r.^(-1) .* ( cos(theta)  
             
         else
-            ret = evaluate(fun, rho=n)
+            ret = evaluate(fun, rho=collect(n))
             vrho = ret.vrho
             
         end            

@@ -11,8 +11,9 @@ include("AngMom.jl")
 #inddict()
 
 using ..AngMom:construct_real_gaunt_indirect
+using ..AngMom:precalc_sphere
 construct_real_gaunt_indirect()
-
+precalc_sphere()
 
 include("LDA.jl")
 include("UseLibxc.jl")
