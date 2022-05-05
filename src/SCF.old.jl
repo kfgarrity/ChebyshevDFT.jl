@@ -126,28 +126,26 @@ function get_initial_rho(rho_init, N, Z, nel, r, w; nspin=1, checknorm=true, ig1
     
     if !ismissing(rho_init)
         if typeof(rho_init) <: Array
-            println("a")
             if length(rho_init[:,1]) != N+1
                 println("make")
                 C = ChebyshevQuantum.Interp.make_cheb(rho_init[:], a = 0.0, b = r[end]);
                 rho = C.(r)
                 if nspin == 2
-                    rho = [ rho  rho]
+                    rho = [ rho; rho]
                 end
             else
                 rho = copy(rho_init)
                 if nspin == 2
-                    rho = [rho  rho]
+                    rho = [rho; rho]
                 end
             end
         else
             rho = rho_init.(r)
             if nspin == 2
-                rho = [ rho  rho]
-
+                rho = [ rho; rho]
             end
         end
-        
+
     else #ismissing case
 
         rho = zeros(N+1, nspin)
@@ -263,10 +261,10 @@ function calc_energy_LM(rho_LM, drho_LM, N, Rmax, rall, wall, VH, filling, vals_
     ENUC = 0.0
     
     a = @spawn begin
-        ELDA = calc_energy_lda_LM(rho_LM, drho_LM, N, Rmax, rall, wall, D1Xgrid, nspin=nspin, funlist=funlist, gga=gga)
+        ELDA = calc_energy_lda_LM(rho_LM, drho_LM, N, Rmax, rall, wall, D1Xgrid, 2*lmax, nspin=nspin, funlist=funlist, gga=gga)
     end
     b = @spawn begin
-        EH = calc_energy_hartree_LM(rho_LM, N, Rmax, rall, wall, VH)
+        EH = calc_energy_hartree_LM(rho_LM, N, Rmax, rall, wall, VH, 2*lmax)
     end
     c = @spawn begin
         KE = calc_energy_ke_LM(rho_LM, N, Rmax, rall, wall, filling, vals_r, Vin)
@@ -380,12 +378,12 @@ function calc_energy_lda(rho, N, Rmax, rall, wall; nspin=1)
     end        
 end
 
-function calc_energy_lda_LM(rho_LM, drho_LM, N, Rmax, rall, wall, D1Xgrid; nspin=1, funlist=funlist, gga=gga)
+function calc_energy_lda_LM(rho_LM, drho_LM, N, Rmax, rall, wall, D1Xgrid, lmax; nspin=1, funlist=funlist, gga=gga)
 
-    vlda_LM, elda_LM = VXC_LM(rho_LM *4*pi, drho_LM*4*pi, rall, D1Xgrid, get_elm=true, funlist=funlist,  gga=gga)
+    vlda_LM, elda_LM = VXC_LM(rho_LM *4*pi, drho_LM*4*pi, rall, D1Xgrid, lmax, get_elm=true, funlist=funlist,  gga=gga)
     elda = 0.0
     rho_LM_tot = sum(rho_LM, dims=2)
-    for l = 1:size(rho_LM)[3]
+    for l = 1:lmax
         for m = 1:size(rho_LM)[4]
             elda += 2*pi*sum(elda_LM[:,l,m].*rho_LM_tot[:,1,l,m].*rall.^2 .* wall)
         end        
@@ -402,10 +400,10 @@ function calc_energy_hartree(rho, N, Rmax, rall, wall, VH)
     
 end
 
-function calc_energy_hartree_LM(rho_LM, N, Rmax, rall, wall, VH)
+function calc_energy_hartree_LM(rho_LM, N, Rmax, rall, wall, VH, lmax)
     eh = 0.0
     rho_LM_tot = sum(rho_LM, dims=2)
-    for l = 1:size(rho_LM)[3]
+    for l = 1:lmax
         for m = 1:size(rho_LM)[4]
             eh +=  sum(VH[:,l,m] .* rho_LM_tot[:,1,l,m] .* wall .* rall.^2 )
         end
@@ -854,11 +852,11 @@ function DFT_spin_l_grid(nel; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init = m
 #            end
         end
         
-#        for spin = 1:nspin
-#            for l = 0:lmax
-#                println("iter $iter vals spin =  $spin l = $l ", vals_r[1:min(5, size(vals_r)[1]), spin, l+1])
-#            end
-#        end
+        for spin = 1:nspin
+            for l = 0:lmax
+                println("iter $iter vals spin =  $spin l = $l ", vals_r[1:min(5, size(vals_r)[1]), spin, l+1])
+            end
+        end
         
 #        println("ass")
         rho_new, filling, rhor2 = assemble_rho(vals_r, vects, nel, rall_rs, wall, rho, N, Rmax, D2Xgrid, nspin=nspin, lmax=lmax, ig1 = ig1)
@@ -961,29 +959,7 @@ function setup_filling(fill_str)
             tsp = String.(sp[1])
             if tsp in keys(atoms)
                 num_el = atoms[tsp]
-
-                for toadd in [ [1,0, 2.0],
-                               [2,0, 2.0],
-                               [2,1, 6.0],
-                               [3,0, 2.0],
-                               [3,1, 6.0],
-                               [4,0, 2.0],
-                               [3,2, 10.0],
-                               [4,1, 6.0],
-                               [5,0, 2.0],
-                               [4,2, 10.0],
-                               [5,1, 6.0],
-                               [6,0, 2.0],
-                               [4,3, 14.0],
-                               [5,2, 10.0],
-                               [6,1, 6.0],
-                               [7,0, 2.0],
-                               [5,3, 14.0],
-                               [4,2, 10.0],
-                               [7,1, 6.0]]
-                    
-                               
-#=                for toadd in   [ [1,0,0,2.0],
+                for toadd in   [ [1,0,0,2.0],
                                  [2,0, 0,2.0],
                                  [2,1, 1,2.0],
                                  [2,1, 0,2.0],
@@ -1026,27 +1002,13 @@ function setup_filling(fill_str)
                                  [6,1, 1,2.0],
                                  [6,1, 0,2.0],
                                  [6,1,-1,2.0] ]
-                    =#
-                    if toadd[3]+1e-15 < (num_el)
-                        l = toadd[2]
-                        n = toadd[3] / (2*l+1)
-                        for m = -l:l
-                            push!(T,[toadd[1],l, m, n])
-                        end
-                        num_el -= toadd[3]
-                        lmax = max(lmax, Int64(l))
+                    if toadd[4]+1e-15 < (num_el)
+                        push!(T,toadd)
+                        num_el -= 2.0
+                        lmax = max(lmax, Int64(toadd[2]))
                     else
-                        l = toadd[2]
-                        n = num_el / (2*l+1)
-                        for m = -l:l
-                            push!(T,[toadd[1],l, m, n])
-                        end
-                        num_el -= toadd[3]
-                        lmax = max(lmax, Int64(l))
-                        
-                        
-                        #                        push!(T,[toadd[1],toadd[2], toadd[3], num_el])
-#                        lmax = max(lmax, Int64(toadd[2]))
+                        push!(T,[toadd[1],toadd[2], toadd[3], num_el])
+                        lmax = max(lmax, Int64(toadd[2]))
                         num_el = 0.0
                         break
                     end
@@ -1091,9 +1053,7 @@ function setup_filling(fill_str)
     end        
          
     nel = zeros(nspin, lmax+1, (2*lmax+1))
-    println("Filling")
     for t in T
-        println(t)
         if length(t) == 4
             n,l,m,num_el = t
             n = Int64(n)
@@ -1123,28 +1083,16 @@ function setup_filling(fill_str)
 end
 
 
-function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init = missing, niters=20, mix = 0.7, mixing_mode=:pulay, ax = 0.2, exc=missing, bx = 0.5)
+function DFT_spin_l_grid_LM(fill_str; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init = missing, niters=20, mix = 0.7, mixing_mode=:pulay, ax = 0.2, exc=missing, bx = 0.5)
 
     
     Z = Float64(Z)
-
-    for k in keys(atoms)
-        if abs(Z - atoms[k]) <=  0.5
-            println("Atom name $k")
-            if ismissing(fill_str)
-                fill_str = k
-            end
-        end
-    end
-
-    
     nel, nspin, lmax = setup_filling(fill_str)
-
     lmax_rho = min(lmax*2+4, 10)
 
-    #lmax_rho = 6
+#    lmax_rho = 6
     #lmax_rho = 8
-    #lmax_rho = 10
+    lmax_rho = 10
     #lmax_rho = 12
     
 #    lmax_rho = 0
@@ -1152,7 +1100,6 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, nmax = 1, Z=1.0, Rmax = 
     if !ismissing(exc)
         funlist,gga = set_functional(exc, nspin=nspin)
     else
-        println("Running default LDA (VWN)")
         funlist = missing
         gga = false
     end
@@ -1316,17 +1263,18 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, nmax = 1, Z=1.0, Rmax = 
         end
     end
     
+    println("before 2 lmax $lmax")
     
-    converged = false
     for iter = 1:niters
 
 
         println()
         #        VLDA = diagm(v_LDA.(rho[2:N]))
         
+        println("before lmax $lmax")
         
         lda_task = @spawn  begin
-            vlda_LM, elda_LM = VXC_LM(rho_LM *4*pi, 4*pi*drho_LM, rall_rs, funlist=funlist, D1Xgrid, gga=gga)
+            vlda_LM, elda_LM = VXC_LM(rho_LM *4*pi, 4*pi*drho_LM, rall_rs, D1Xgrid, lmax*2, funlist=funlist,  gga=gga)
         end
 
         poisson_task = @spawn         begin
@@ -1464,28 +1412,27 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, nmax = 1, Z=1.0, Rmax = 
 
 #        println("filling ", filling)
 
-#            for spin = 1:nspin
-#                for l = 0:lmax
-#                    for m = -l:l
-#                        d = FastSphericalHarmonics.sph_mode(l,m)
-#                        println("iter $iter vals spin =  $spin l = $l m = $m   ", vals_r[1:min(5, size(vals_r)[1]), spin, d[1],d[2]])
-#                    end
-#                end
-#            end
+            for spin = 1:nspin
+                for l = 0:lmax
+                    for m = -l:l
+                        d = FastSphericalHarmonics.sph_mode(l,m)
+                        println("iter $iter vals spin =  $spin l = $l m = $m   ", vals_r[1:min(5, size(vals_r)[1]), spin, d[1],d[2]])
+                    end
+                end
+            end
         
-#        energy = calc_energy_LM(rho_LM, drho_LM, N, Rmax, rall_rs, wall, VH_LM, filling, vals_r, Vtot, Z, D1Xgrid, nspin=nspin, lmax=lmax, ig1=ig1, funlist=funlist, gga=gga, verbose=false)
+        energy = calc_energy_LM(rho_LM, drho_LM, N, Rmax, rall_rs, wall, VH_LM, filling, vals_r, Vtot, Z, D1Xgrid, nspin=nspin, lmax=lmax, ig1=ig1, funlist=funlist, gga=gga, verbose=false)
         
         eigs_tot_new = sum(filling.*vals_r)
         println("conv check ", abs(eigs_tot_old-eigs_tot_new))
         if iter > 1 && abs(eigs_tot_old-eigs_tot_new) < 1e-6
             println()
             println("eigval-based convergence reached ", abs(eigs_tot_old-eigs_tot_new))
-            converged = true
             for spin = 1:nspin
                 for l = 0:lmax
                     for m = -l:l
                         d = FastSphericalHarmonics.sph_mode(l,m)
-                        println("iter $iter vals spin =  $spin l = $l m = $m   ", vals_r[1:min(6, size(vals_r)[1]), spin, d[1],d[2]])
+                        println("iter $iter vals spin =  $spin l = $l m = $m   ", vals_r[1:min(5, size(vals_r)[1]), spin, d[1],d[2]])
                     end
                 end
             end
@@ -1506,7 +1453,7 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, nmax = 1, Z=1.0, Rmax = 
         n2out[:] = rho_new_LM[:]
         
         
-        if iter > 6 && mixing_mode == :pulay
+        if iter > 2 && mixing_mode == :pulay
         #if 
             for spin = 1:nspin
 
@@ -1518,12 +1465,8 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, nmax = 1, Z=1.0, Rmax = 
 #                    end
 #                end
             end
-        elseif iter > 50
-            mm = min(0.25, mix)
-            rho_LM[:] = mm*rho_new_LM[:] + (1.0-mm)*rho_old_LM[:]
         else
-            mm = min(0.7, mix)
-            rho_LM[:] = mm*rho_new_LM[:] + (1.0-mm)*rho_old_LM[:]
+            rho_LM[:] = mix*rho_new_LM[:] + (1.0-mix)*rho_old_LM[:]
         end
         
 #        rho_veryold[:] = rho_old[:]
@@ -1540,7 +1483,7 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, nmax = 1, Z=1.0, Rmax = 
     energy = 0.0
     energy = calc_energy_LM(rho_LM, drho_LM, N, Rmax, rall_rs, wall, VH_LM, filling, vals_r, Vtot, Z, D1Xgrid, nspin=nspin, lmax=lmax, ig1=ig1, funlist=funlist, gga=gga)
 
-    return energy,converged, vals_r, vects, rho_LM, rall_rs, wall.*ig1, rhor2, vlda_LM, drho_LM, D1Xgrid, va, rhoR, rhoR2
+    return energy, vals_r, vects, rho_LM, rall_rs, wall.*ig1, rhor2, vlda_LM, drho_LM, D1Xgrid, va, rhoR, rhoR2
     
 end    
 
@@ -1651,7 +1594,7 @@ function VXC_LM(rho_LM, drho_LM, r, D1; get_elm=false, funlist=missing, gga=fals
 
     #println("get rho")
 
-    rho, drho, ddrho, vsigma, dvsigma,THETA,PHI = get_rho_rs(rho_LM, drho_LM, r, funlist, gga=gga) 
+    rho, drho, ddrho, vsigma, dvsigma,THETA,PHI = get_rho_rs(rho_LM, drho_LM, r, funlist, lmax, gga=gga) 
 
 #    println("1rho      ", rho[50:55, 1,1,1])
 #    println("1rho_test ", rho_test[50:55, 1,1,1])
@@ -1757,8 +1700,12 @@ end
 
 
 
-function get_rho_rs(rho_LM, drho_LM, r, funlist; gga=false)
+function get_rho_rs(rho_LM, drho_LM, r, funlist, lmax_rho; gga=false)
 
+#    println("lmax_rho ")
+#    println(lmax_rho)
+#    println(size(lmax_rho))
+    
     nspin = size(rho_LM)[2]
     nr = size(rho_LM)[1]
 
@@ -1777,7 +1724,7 @@ function get_rho_rs(rho_LM, drho_LM, r, funlist; gga=false)
 
     #this stuff is to compute derivatives of spherical harmonics. This could be cached.
     #println("begin")
-    begin
+#    begin
 #=        function ftheta(x)
             SphericalHarmonics.computeYlm(x, phi, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())
         end
@@ -1792,7 +1739,7 @@ function get_rho_rs(rho_LM, drho_LM, r, funlist; gga=false)
         ddftheta = x-> ForwardDiff.derivative(dftheta, x)
         ddfphi = x-> ForwardDiff.derivative(dfphi, x)
   =#      
-    end
+#    end
     
 #    ml = SphericalHarmonicModes.ML(0:lmax, -lmax:lmax)
     
@@ -1802,24 +1749,18 @@ function get_rho_rs(rho_LM, drho_LM, r, funlist; gga=false)
     #    @threads for (t,theta) in enumerate(THETA)
 
 #    println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-
-    srho = sum(abs.(rho_LM), dims=[1,2])[1,1,:,:]
-    
     
     for l = 0:lmax
+        id = threadid()
         for m = -l:l
             d = FastSphericalHarmonics.sph_mode(l,m)
-            if srho[d[1], d[2]]  < 1e-7
-                continue
-            end
-            
             for t in 1:length(THETA)
                 theta = THETA[t]
-                id = threadid()
-                
+
                 for (p,phi) in enumerate(PHI) 
-                    #                        rho_thr[:,:,t, p, id] += ( rho_LM[:,:, d[1], d[2]]) * Y[(l,m)]
+                    
                     rho_thr[:,:,t, p, id] .+= (@view rho_LM[:,:, d[1], d[2]]) * Y_dict[(lmax, t,p,l,m)]
+                    
                     if gga
                         drho_thr[:,:,t, p,1, id] .+= ( @view drho_LM[:,:, d[1], d[2]]) * Y_dict[(lmax, t,p,l,m)]
                         drho_thr[:,:,t, p,2, id] .+= ( @view rho_LM[:,:, d[1], d[2]]) *  Ytheta_dict[(lmax, t,p,l,m)]
@@ -1828,8 +1769,9 @@ function get_rho_rs(rho_LM, drho_LM, r, funlist; gga=false)
                         ddrho_thr[:,:,t, p,2, id] .+= ( @view  rho_LM[:,:, d[1], d[2]]) *  Ytheta2_dict[(lmax,t,p,l,m)]
                         ddrho_thr[:,:,t, p,3, id] .+= ( @view  rho_LM[:,:, d[1], d[2]]) *  Yphi2_dict[(lmax,t,p,l,m)]
                     end
+                        
+                    
                 end
-                
             end
             
         end
@@ -1910,34 +1852,33 @@ function get_rho_rs(rho_LM, drho_LM, r, funlist; gga=false)
         lmax = lmax 
         ml = SphericalHarmonicModes.ML(0:lmax, -lmax:lmax)
         #println("realspace again")
+        for t in 1:length(THETA)
+            id = threadid()
 
-        sv = sum(abs.(vsigma_lm), dims=[1,2])[1,1,:,:]
-        
-    
-        for l = 0:lmax
-            for m = -l:l
-                d = FastSphericalHarmonics.sph_mode(l,m)
-                if sv[d[1], d[2]]  < 1e-8
-                    continue
-                end
+            for (p,phi) in enumerate(PHI) 
+#                Y = SphericalHarmonics.computeYlm(theta, phi, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())
 
-                for t in 1:length(THETA)
-                    id = threadid()
-                    for (p,phi) in enumerate(PHI) 
-                        #                for l = 0:(lmax)
-                        #                    for m = -l:l
-                        #                        d = FastSphericalHarmonics.sph_mode(l,m)
-                        if nspin == 1
-                            dvsigma_thr[:,1,t, p,2,id] .+=   0.5*( vsigma_lm[:,1, d[1], d[2]]) * Ytheta_dict[(lmax, t,p,l,m)] #dtheta[modeindex(ml, (l,m))]
-                            dvsigma_thr[:,1,t, p,3,id] .+=   0.5*( vsigma_lm[:,1, d[1], d[2]]) * Yphi_dict[(lmax, t,p,l,m)] #dphi[modeindex(ml, (l,m))]
+#                dtheta = dftheta(theta)
+#                dphi = dfphi(phi)
+                for l = 0:(lmax)
+                    for m = -l:l
+                    #for m = [0]
+                        d = FastSphericalHarmonics.sph_mode(l,m)
+                        #                            dvsigma[1:end,spin,t, p,2] +=   vsigma_lm[1:end,spin, d[1], d[2]] *  dtheta[modeindex(ml, (l,m))]
+                        #                            dvsigma[1:end,spin,t, p,3] +=   vsigma_lm[1:end,spin, d[1], d[2]] *  dphi[modeindex(ml, (l,m))]
+#                        if d[1] <= size(vsigma_lm)[3] && d[2] <= size(vsigma_lm)[4]
+                            
+                            if nspin == 1
+                                dvsigma_thr[:,1,t, p,2,id] .+=   0.5*( vsigma_lm[:,1, d[1], d[2]]) * Ytheta_dict[(lmax, t,p,l,m)] #dtheta[modeindex(ml, (l,m))]
+                                dvsigma_thr[:,1,t, p,3,id] .+=   0.5*( vsigma_lm[:,1, d[1], d[2]]) * Yphi_dict[(lmax, t,p,l,m)] #dphi[modeindex(ml, (l,m))]
                             elseif nspin == 2
-                            for ii = 1:3
-                                dvsigma_thr[:,ii,t, p,2,id] .+=   0.5*( vsigma_lm[:,ii, d[1], d[2]]) * Ytheta_dict[(lmax, t,p,l,m)]# dtheta[modeindex(ml, (l,m))]
-                                dvsigma_thr[:,ii,t, p,3,id] .+=   0.5*( vsigma_lm[:,ii, d[1], d[2]]) * Yphi_dict[(lmax, t,p,l,m)]# dphi[modeindex(ml, (l,m))]
+                                for ii = 1:3
+                                    dvsigma_thr[:,ii,t, p,2,id] .+=   0.5*( vsigma_lm[:,ii, d[1], d[2]]) * Ytheta_dict[(lmax, t,p,l,m)]# dtheta[modeindex(ml, (l,m))]
+                                    dvsigma_thr[:,ii,t, p,3,id] .+=   0.5*( vsigma_lm[:,ii, d[1], d[2]]) * Yphi_dict[(lmax, t,p,l,m)]# dphi[modeindex(ml, (l,m))]
+                                end
                             end
                         end
-                    end
-                    #                   end
+ #                   end
                 end
             end
         end
