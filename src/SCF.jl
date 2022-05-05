@@ -1123,7 +1123,7 @@ function setup_filling(fill_str)
 end
 
 
-function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init = missing, niters=20, mix = 0.7, mixing_mode=:pulay, ax = 0.2, exc=missing, bx = 0.5)
+function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_init = missing, niters=50, mix = 0.5, mixing_mode=:pulay, ax = 0.2, exc=missing, bx = 0.5)
 
     
     Z = Float64(Z)
@@ -1150,6 +1150,19 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, nmax = 1, Z=1.0, Rmax = 
 #    lmax_rho = 0
         
     if !ismissing(exc)
+
+        #convenience functions
+        if (typeof(exc) == String && lowercase(exc) == "pbe") || (typeof(exc) == Symbol && exc == :pbe)
+            exc = [:gga_x_pbe, :gga_c_pbe]
+        elseif (typeof(exc) == String && lowercase(exc) == "pbesol") || (typeof(exc) == Symbol && exc == :pbesol)
+            exc = [:gga_x_pbe_sol, :gga_c_pbe_sol]
+        elseif (typeof(exc) == String && lowercase(exc) == "lda") || (typeof(exc) == Symbol && exc == :lda)
+            exc = [:lda_x, :lda_c_vwn]
+        elseif (typeof(exc) == String && lowercase(exc) == "vwn") || (typeof(exc) == Symbol && exc == :vwn)
+            exc = [:lda_x, :lda_c_vwn]
+        end    
+
+        
         funlist,gga = set_functional(exc, nspin=nspin)
     else
         println("Running default LDA (VWN)")
