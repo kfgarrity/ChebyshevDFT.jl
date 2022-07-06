@@ -99,6 +99,7 @@ function h_rad(n, l;Z=1.0)
     #units where Bohr radius  a0 = 1
     #note : hydrogen basis not complete unless you add continuum states
 
+    if Z < 1; Z=1.0; end
     
     if n <= 0 || l < 0 || l >= n
         println("ERROR h_rad n l $n $l")
@@ -250,7 +251,7 @@ function calc_energy(rho, N, Rmax, rall, wall, VH, filling, vals_r, Vin, Z; nspi
     
 end
 
-function calc_energy_LM(rho_LM, drho_LM, N, Rmax, rall, wall, VH, filling, vals_r, Vin, Z, D1Xgrid; nspin=1, lmax=0, ig1=missing, funlist=funlist, gga=gga, verbose=true)
+function calc_energy_LM(rho_LM, drho_LM, N, Rmax, rall, wall, VH, filling, vals_r, Vin, Z, D1Xgrid; nspin=1, lmax=0, ig1=missing, funlist=funlist, gga=gga, verbose=true, vext = missing, hydrogen=false)
 
     if ismissing(ig1)
         ig1 = ones(size(rall))
@@ -263,10 +264,14 @@ function calc_energy_LM(rho_LM, drho_LM, N, Rmax, rall, wall, VH, filling, vals_
     ENUC = 0.0
     
     a = @spawn begin
-        ELDA = calc_energy_lda_LM(rho_LM, drho_LM, N, Rmax, rall, wall, D1Xgrid, nspin=nspin, funlist=funlist, gga=gga)
+        if hydrogen == false
+            ELDA = calc_energy_lda_LM(rho_LM, drho_LM, N, Rmax, rall, wall, D1Xgrid, nspin=nspin, funlist=funlist, gga=gga)
+        end
     end
     b = @spawn begin
-        EH = calc_energy_hartree_LM(rho_LM, N, Rmax, rall, wall, VH)
+        if hydrogen == false
+            EH = calc_energy_hartree_LM(rho_LM, N, Rmax, rall, wall, VH)
+        end
     end
     c = @spawn begin
         KE = calc_energy_ke_LM(rho_LM, N, Rmax, rall, wall, filling, vals_r, Vin)
@@ -274,19 +279,32 @@ function calc_energy_LM(rho_LM, drho_LM, N, Rmax, rall, wall, VH, filling, vals_
     d = @spawn begin
         ENUC = calc_energy_enuc_LM(rho_LM, N, Rmax, rall, wall,Z)
     end
+    EEXT = 0.0
+    e = @spawn begin
+        if !ismissing(vext)
+            EEXT = calc_energy_vext_LM(rho_LM, N, Rmax, rall, wall,vext)
+        else
+            EEXT = 0.0
+        end
+    end
+
     wait(b)
     wait(c)
     wait(d)
     wait(a)
+    wait(e)
 
     if verbose
         println("ELDA   $ELDA")
         println("EH     $EH")
         println("KE     $KE")
         println("ENUC   $ENUC")
+        if !ismissing(vext)
+            println("EEXT   $EEXT")
+        end
     end
     
-    ENERGY = ELDA + EH + KE + ENUC
+    ENERGY = ELDA + EH + KE + ENUC + EEXT
     println()
     println("ENERGY $ENERGY ")
     println()
@@ -334,6 +352,13 @@ function calc_energy_enuc_LM(rho_LM, N, Rmax, rall, wall, Z)
     return -Z * 4 * pi * sum(sum(rho_LM[:,:,1,1],dims=2) .* wall .* rall) * sqrt(4*pi)
 
 end
+
+function calc_energy_vext_LM(rho_LM, N, Rmax, rall, wall, vext)
+
+    return   4 * pi * sum(sum(rho_LM[:,:,1,1],dims=2) .* vext .* wall .* rall.^2) * sqrt(4*pi)
+
+end
+
 
 function calc_energy_ke(rho, N, Rmax, rall, wall, filling, vals_r, Vin)
 
@@ -559,9 +584,12 @@ function assemble_rho_LM(vals_r, vects, nel, rall, wall, rho, N, Rmax, D2, D1; n
                 inds = sortperm(vals_r[:,spin,d1[1], d1[2]])
                 for i in inds
                     vnorm[:] = [0; real.(vects[:,i,spin,d1[1], d1[2]].*conj(vects[:,i,spin,d1[1],d1[2]])); 0]
-#                    vnorm[2:N] = vnorm[2:N] #./ rall[2:N].^2
+                    println("vn 2 a ", vnorm[2])
+                    #                    vnorm[2:N] = vnorm[2:N] #./ rall[2:N].^2
                     vnorm = vnorm / (4.0*pi*sum(vnorm .* wall .* ig1))# .* rall.^2))
 
+                    println("vn 2 b ", vnorm[2])
+                    
 #                    println("vnormLM ", vnorm[1:3])
                     
                     if nleft <= fillval/nspin + 1e-10
@@ -625,6 +653,8 @@ function assemble_rho_LM(vals_r, vects, nel, rall, wall, rho, N, Rmax, D2, D1; n
         d1r = D1 * t
 
         rhoR2 = deepcopy(rho)
+
+        println("rhoR2 2 ", rhoR2[2])
         
 #        d2r = (D2[:,:] * rho[:,spin,1,1])  #/ norm * sum(nel[:,spin])  
 
@@ -776,6 +806,8 @@ function DFT_spin_l_grid(nel; N = 40, nmax = 1, Z=1.0, Rmax = 10.0, rho_init = m
             
             H0 = -0.5*( diagm(grid1.(rall_rs[2:N]).^2)*D2 + diagm(grid2.(rall_rs[2:N])) *D  ) + Vc
 
+                   
+            
             #H0 = -0.5 * diagm(1.0 ./ r.^2)*D*diagm(r).^2*D + Vc
             push!(H0_L, H0)
         end
@@ -1123,8 +1155,12 @@ function setup_filling(fill_str)
 end
 
 
-function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_init = missing, niters=50, mix = 0.5, mixing_mode=:pulay, ax = 0.2, exc=missing, bx = 0.5)
-
+function prepare_dft(Z, N, Rmax, ax, bx, fill_str, spherical, vext, lmax_rho)
+                     
+    if typeof(Z) == String || typeof(Z) == Symbol
+        Z = atoms[String(Z)]
+    end
+    
     
     Z = Float64(Z)
 
@@ -1136,49 +1172,18 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
             end
         end
     end
-
     
     nel, nspin, lmax = setup_filling(fill_str)
 
-    lmax_rho = min(lmax*2+4, 10)
-
-    #lmax_rho = 6
-    #lmax_rho = 8
-    #lmax_rho = 10
-    #lmax_rho = 12
+    if ismissing(lmax_rho)
+        lmax_rho = min(lmax*2+4, 10)
+    end
     
-#    lmax_rho = 0
-        
-    if !ismissing(exc)
-
-        #convenience functions
-        if (typeof(exc) == String && lowercase(exc) == "pbe") || (typeof(exc) == Symbol && exc == :pbe)
-            exc = [:gga_x_pbe, :gga_c_pbe]
-        elseif (typeof(exc) == String && lowercase(exc) == "pbesol") || (typeof(exc) == Symbol && exc == :pbesol)
-            exc = [:gga_x_pbe_sol, :gga_c_pbe_sol]
-        elseif (typeof(exc) == String && lowercase(exc) == "lda") || (typeof(exc) == Symbol && exc == :lda)
-            exc = [:lda_x, :lda_c_vwn]
-        elseif (typeof(exc) == String && lowercase(exc) == "vwn") || (typeof(exc) == Symbol && exc == :vwn)
-            exc = [:lda_x, :lda_c_vwn]
-        end    
-
-        
-        funlist,gga = set_functional(exc, nspin=nspin)
-    else
-        println("Running default LDA (VWN)")
-        funlist = missing
-        gga = false
+    if spherical
+        lmax_rho = 0
     end
 
-
-    
-    println()
-    println("Running Z= $Z with nspin= $nspin lmax= $lmax Nel= ", sum(nel))
-    println()
-
-#    println("setup")
-
-
+    #=
     begin
         function grid(x)
             return log(bx*x + ax)
@@ -1199,9 +1204,8 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
             return grid1(x).^-1
         end
     end
-
-
-#=    begin
+=#
+    begin
 
         println("linear grid")
         function grid(x)
@@ -1223,25 +1227,122 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
             return 1.0
         end
     end
-=#
+    
     
 #    println("fakegrid")
     
-    
-    begin
-        r, D, D2, w, rall,wall,H_poisson, D1X, D2X = setup_mats(;N = N, a=grid(0.0), Rmax=grid(Rmax))
 
+    
+    r, D, D2, w, rall,wall,H_poisson, D1X, D2X = setup_mats(;N = N, a=grid(0.0), Rmax=grid(Rmax))
+
+    
+    rall_rs = invgrid.(rall)
+
+    
+    ig1 = invgrid1.(rall_rs)
+
+    H_poisson = diagm(grid1.(rall_rs[2:N]).^2)*D2 + diagm(grid2.(rall_rs[2:N])) *D +  diagm( 2.0 ./ rall_rs[2:N] )*diagm(grid1.(rall_rs[2:N]))  * D
+    D2grid = ( diagm(grid1.(rall_rs[2:N]).^2)*D2 + diagm(grid2.(rall_rs[2:N])) *D  )
+    D2Xgrid = ( diagm(grid1.(rall_rs).^2)*D2X + diagm(grid2.(rall_rs)) *D1X  )
+
+    D1Xgrid = diagm(grid1.(rall_rs))*D1X
+
+    if ismissing(vext)
+        VEXT = zeros(N+1)
+    elseif typeof(vext) != Vector{Float64} || typeof(vext) != Array{Float64, 1}
+        println("vect ", typeof(vext))
+        VEXT = vext.(rall_rs)
+    else
+        VEXT = vext
+    end
+
+    H0_L = []
+    
+    for l = 0:lmax
+        Vc = getVcoulomb(rall_rs[2:N], Z, l)
+
+        Vc += diagm(VEXT[2:N])
+        
+        H0 = -0.5*( diagm(grid1.(rall_rs[2:N]).^2)*D2 + diagm(grid2.(rall_rs[2:N])) *D  ) + Vc
+
+        #            println("H0 $l ")
+        #            println(H0)
+        #            println()
 
         
-        rall_rs = invgrid.(rall)
+        #H0 = -0.5 * diagm(1.0 ./ r.^2)*D*diagm(r).^2*D + Vc
+        push!(H0_L, H0)
+        
+    end
+    Vc = getVcoulomb(rall_rs[2:N], Z, 0)
 
-        ig1 = invgrid1.(rall_rs)
+    spin_lm = []
+    for spin = 1:nspin
+        for l = 0:lmax
+            for m = -l:l
+                push!(spin_lm,  [spin, l,m])
+            end
+        end
+    end
 
-        H_poisson = diagm(grid1.(rall_rs[2:N]).^2)*D2 + diagm(grid2.(rall_rs[2:N])) *D +  diagm( 2.0 ./ rall_rs[2:N] )*diagm(grid1.(rall_rs[2:N]))  * D
-        D2grid = ( diagm(grid1.(rall_rs[2:N]).^2)*D2 + diagm(grid2.(rall_rs[2:N])) *D  )
-        D2Xgrid = ( diagm(grid1.(rall_rs).^2)*D2X + diagm(grid2.(rall_rs)) *D1X  )
+    spin_lm_rho = []
+    for spin = 1:nspin
+        for l = 0:(lmax*2)
+            for m = -l:l
+                push!(spin_lm_rho,  [spin, l,m])
+            end
+        end
+    end
 
-        D1Xgrid = diagm(grid1.(rall_rs))*D1X
+    
+    return Z, nel, nspin, lmax, lmax_rho, grid, grid1, grid2, invgrid, invgrid1, r, D, D2, w, rall,wall,H_poisson, D1X, D2X, rall_rs, ig1, H_poisson, D2grid, D2Xgrid, D1Xgrid, VEXT, H0_L, Vc, spin_lm, spin_lm_rho
+    
+end
+    
+function choose_exc(exc)
+
+    if !ismissing(exc)
+
+        #convenience functions
+        if (typeof(exc) == String && lowercase(exc) == "pbe") || (typeof(exc) == Symbol && exc == :pbe)
+            exc = [:gga_x_pbe, :gga_c_pbe]
+        elseif (typeof(exc) == String && lowercase(exc) == "pbesol") || (typeof(exc) == Symbol && exc == :pbesol)
+            exc = [:gga_x_pbe_sol, :gga_c_pbe_sol]
+        elseif (typeof(exc) == String && lowercase(exc) == "lda") || (typeof(exc) == Symbol && exc == :lda)
+            exc = [:lda_x, :lda_c_vwn]
+        elseif (typeof(exc) == String && lowercase(exc) == "vwn") || (typeof(exc) == Symbol && exc == :vwn)
+            exc = [:lda_x, :lda_c_vwn]
+        end    
+
+        
+        funlist,gga = set_functional(exc, nspin=nspin)
+    else
+        println("Running default LDA (VWN)")
+        funlist = missing
+        gga = false
+    end
+
+    return funlist, gga
+
+end
+
+
+function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_init = missing, niters=50, mix = 0.5, mixing_mode=:pulay, ax = 0.2, exc=missing, bx = 0.5, vext = missing, spherical = false, hydrogen=false, lmax_rho = missing)
+
+
+    Z, nel, nspin, lmax, lmax_rho, grid, grid1, grid2, invgrid, invgrid1, r, D, D2, w, rall,wall,H_poisson, D1X, D2X, rall_rs, ig1, H_poisson, D2grid, D2Xgrid, D1Xgrid, VEXT, H0_L, Vc, spin_lm, spin_lm_rho = prepare_dft(Z, N, Rmax, ax, bx, fill_str, spherical, vext, lmax_rho)
+
+    funlist, gga = choose_exc(exc)
+    
+        
+    
+    println()
+    println("Running Z= $Z with nspin= $nspin lmax= $lmax Nel= ", sum(nel))
+    println()
+
+    
+    begin
+
         
         if nspin == 1
             nel_t = [sum(nel)]
@@ -1272,24 +1373,6 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
 
         drho_LM = zeros(size(rho_LM))
 
-#        KE = getKE(r)
-
-        H0_L = []
-
-        
-        for l = 0:lmax
-            Vc = getVcoulomb(rall_rs[2:N], Z, l)
-            H0 = -0.5*( diagm(grid1.(rall_rs[2:N]).^2)*D2 + diagm(grid2.(rall_rs[2:N])) *D  ) + Vc
-            
-            #H0 = -0.5 * diagm(1.0 ./ r.^2)*D*diagm(r).^2*D + Vc
-            push!(H0_L, H0)
-                  
-        end
-        Vc = getVcoulomb(rall_rs[2:N], Z, 0)
-
-        
-#        Ham = zeros(N-1, N-1)
-        
         vects = zeros(Complex{Float64}, N-1, N-1, nspin, lmax+1, 2*lmax+1)
         vals_r = zeros(Float64, N-1, nspin, lmax+1,2*lmax+1)    
 
@@ -1311,30 +1394,14 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
 
     eigs_tot_old = sum(filling.*vals_r)
 
-    spin_lm = []
-    for spin = 1:nspin
-        for l = 0:lmax
-            for m = -l:l
-                push!(spin_lm,  [spin, l,m])
-            end
-        end
-    end
-
-    spin_lm_rho = []
-    for spin = 1:nspin
-        for l = 0:(lmax*2)
-            for m = -l:l
-                push!(spin_lm_rho,  [spin, l,m])
-            end
-        end
-    end
     
     
     converged = false
+    println()
     for iter = 1:niters
 
 
-        println()
+#        println()
         #        VLDA = diagm(v_LDA.(rho[2:N]))
         
         
@@ -1358,8 +1425,9 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
         wait(lda_task)
         wait(poisson_task)
 
-
-        
+#        println("VH_LM " )
+#        println(VH_LM[:,1,1])
+#        println()
 
 #       return VLDA[:,1], VH, rall_rs
 #
@@ -1380,11 +1448,25 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
         Vtot .= 0.0
 
 
-        Vtot[:,1,:,:] .= (4*pi*VH_LM[:,:,:]  + vlda_LM[:,1,:,:])
+        if hydrogen == false
+            Vtot[:,1,:,:] .= (4*pi*VH_LM[:,:,:]  + vlda_LM[:,1,:,:])
+        end
+        
         Vtot[2:N,1, 1,1] += diag(Vc) * sqrt(4*pi)
+        if !ismissing(vext)
+            Vtot[2:N,1, 1,1] += VEXT[2:N] * sqrt(4*pi)
+        end
+        #Vtot[2:N,1, 1,1] += diag(Vc) * sqrt(4*pi)
+
         if nspin == 2             
-            Vtot[:,2,:,:] .= (4*pi*VH_LM[:, :,:]  + vlda_LM[:,2,:,:])
+            if hydrogen == false
+                Vtot[:,2,:,:] .= (4*pi*VH_LM[:, :,:]  + vlda_LM[:,2,:,:])
+            end
+            
             Vtot[2:N,2, 1,1] += diag(Vc) * sqrt(4*pi)
+        end
+        if !ismissing(vext) && nspin == 2
+            Vtot[2:N,2, 1,1] += VEXT[2:N] * sqrt(4*pi)
         end
 
         
@@ -1441,7 +1523,15 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
             
             #            for l = 0:lmax
 
-            Ham = H0_L[l+1] + (VH_mat + VLDA_mat)
+            if hydrogen
+                Ham = H0_L[l+1] #+ (VH_mat + VLDA_mat)
+            else
+                Ham = H0_L[l+1] + (VH_mat + VLDA_mat)
+            end                
+
+
+            #            println("Ham $l spin $spin")
+#            println(Ham)
             vals, v = eigen(Ham)
             #vals, v = eigs(Ham, which=:SM, nev=4)
 #            println("spin $spin l $l m $m")
@@ -1455,7 +1545,7 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
 #        println("rho_LM ", rho_LM[1:3,1,1,1])
         #println("ass")
 
-        rho_new_LM, filling, rhor2, rhoR, rhoR2 = assemble_rho_LM(vals_r, vects, nel, rall_rs, wall, rho_LM, N, Rmax, D2Xgrid, D1Xgrid, nspin=nspin, lmax=lmax, ig1 = ig1, gga=true)
+        rho_new_LM, filling, rhor2, rhoR, rhoR2 = assemble_rho_LM(vals_r, vects, nel, rall_rs, wall, rho_LM, N, Rmax, D2Xgrid, D1Xgrid, nspin=nspin, lmax=lmax, ig1 = ig1, gga=gga)
 
         
         #return filling
@@ -1551,9 +1641,11 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
 
     println("energy")
     energy = 0.0
-    energy = calc_energy_LM(rho_LM, drho_LM, N, Rmax, rall_rs, wall, VH_LM, filling, vals_r, Vtot, Z, D1Xgrid, nspin=nspin, lmax=lmax, ig1=ig1, funlist=funlist, gga=gga)
+    energy = calc_energy_LM(rho_LM, drho_LM, N, Rmax, rall_rs, wall, VH_LM, filling, vals_r, Vtot, Z, D1Xgrid, nspin=nspin, lmax=lmax, ig1=ig1, funlist=funlist, gga=gga, vext=VEXT, hydrogen=hydrogen)
 
-    return energy,converged, vals_r, vects, rho_LM, rall_rs, wall.*ig1, rhor2, vlda_LM, drho_LM, D1Xgrid, va, rhoR, rhoR2
+    #    return energy,converged, vals_r, vects, rho_LM, rall_rs, wall.*ig1, rhor2, vlda_LM, drho_LM, D1Xgrid, va, rhoR, rhoR2
+
+    return energy,converged, vals_r, vects, rho_LM, rall_rs, wall.*ig1, rhoR2
     
 end    
 

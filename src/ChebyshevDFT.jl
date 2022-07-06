@@ -19,6 +19,7 @@ include("LDA.jl")
 include("UseLibxc.jl")
 include("Hartree.jl")
 include("SCF.jl")
-
+include("Inverse.jl")
+#include("Search.jl")
 
 end # module
