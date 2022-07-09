@@ -584,11 +584,11 @@ function assemble_rho_LM(vals_r, vects, nel, rall, wall, rho, N, Rmax, D2, D1; n
                 inds = sortperm(vals_r[:,spin,d1[1], d1[2]])
                 for i in inds
                     vnorm[:] = [0; real.(vects[:,i,spin,d1[1], d1[2]].*conj(vects[:,i,spin,d1[1],d1[2]])); 0]
-                    println("vn 2 a ", vnorm[2])
+#                    println("vn 2 a ", vnorm[2])
                     #                    vnorm[2:N] = vnorm[2:N] #./ rall[2:N].^2
                     vnorm = vnorm / (4.0*pi*sum(vnorm .* wall .* ig1))# .* rall.^2))
 
-                    println("vn 2 b ", vnorm[2])
+#                    println("vn 2 b ", vnorm[2])
                     
 #                    println("vnormLM ", vnorm[1:3])
                     
@@ -654,7 +654,7 @@ function assemble_rho_LM(vals_r, vects, nel, rall, wall, rho, N, Rmax, D2, D1; n
 
         rhoR2 = deepcopy(rho)
 
-        println("rhoR2 2 ", rhoR2[2])
+#        println("rhoR2 2 ", rhoR2[2])
         
 #        d2r = (D2[:,:] * rho[:,spin,1,1])  #/ norm * sum(nel[:,spin])  
 
@@ -1645,7 +1645,7 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
 
     #    return energy,converged, vals_r, vects, rho_LM, rall_rs, wall.*ig1, rhor2, vlda_LM, drho_LM, D1Xgrid, va, rhoR, rhoR2
 
-    return energy,converged, vals_r, vects, rho_LM, rall_rs, wall.*ig1, rhoR2
+    return energy,converged, vals_r, vects, rho_LM, rall_rs, wall.*ig1, rhoR2, VH_LM
     
 end    
 
