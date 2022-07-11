@@ -17,7 +17,7 @@ using ..SCF:VXC_LM
 using ..Hartree:V_H3
 
 
-function get_inv(rho_LM_target; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, ax = 0.2, bx = 0.5, spherical = false, vext = missing, lmax_rho = missing, hydrogen)
+function get_inv(rho_LM_target; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, ax = 0.2, bx = 0.5, spherical = false, vext = missing, lmax_rho = missing, hydrogen=false)
 
     Z, nel, nspin, lmax, lmax_rho, grid, grid1, grid2, invgrid, invgrid1, r, D, D2, w, rall,wall,H_poisson, D1X, D2X, rall_rs, ig1, H_poisson, D2grid, D2Xgrid, D1Xgrid, VEXT, H0_L, Vc, spin_lm, spin_lm_rho = prepare_dft(Z, N, Rmax, ax, bx, fill_str, spherical, vext, lmax_rho)
 
@@ -184,10 +184,21 @@ function get_inv(rho_LM_target; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, ax
 #                println("size rho_LM_target ", size(rho_LM_target))
 #                println("vects ", size(vects))
 #                println("size weights ", size(weights))
-                B[1:(N-1)] =  (4*pi)^-(3/2)  *    4.0*weights[:, spin, d[1], d[2]]  .* (rho_LM_target[2:N, spin, d[1], d[2]] - rho_LM[2:N, spin, d[1], d[2]]  ) .* (
-                vnorm / sum(vnorm.^2 .* ig1[2:N] .* wall[2:N]) - 1.0*vnorm.^3  .* ig1[2:N] .* wall[2:N] / sum(vnorm.^2 .* ig1[2:N] .* wall[2:N])^2  ) * filling[n,spin,d[1],d[2]]
-                
 
+                norm = sum(vnorm.^2 .* ig1[2:N] .* wall[2:N])
+
+                B[1:(N-1)] =  (4*pi)^-(3/2)  *    4.0*weights[:, spin, d[1], d[2]]  .* (rho_LM_target[2:N, spin, d[1], d[2]] - rho_LM[2:N, spin, d[1], d[2]]  ) .* (
+                    vnorm / norm   ) * filling[n,spin,d[1],d[2]]
+
+                #- 0.0*vnorm.^1  .* ig1[2:N] .* wall[2:N] * sum(vnorm.^2) / sum(vnorm.^2 .* ig1[2:N] .* wall[2:N])^2
+                for i = 1:length(vnorm)
+                    for j = 1:length(vnorm)            
+                        B[i] += -(4*pi)^-(3/2) * 4.0* weights[j, spin, d[1], d[2]]* (rho_LM_target[2:N, spin, d[1], d[2]] - rho_LM[2:N, spin, d[1], d[2]]  )[j] .* (vnorm[j].^2 .* vnorm[i].* ig1[i] .* wall[i] / norm^2  ) * filling[n,spin,d[1],d[2]]
+                    end
+                end
+
+                println("hi")
+                
                 VV =  MAT \ B
                 
                 grad_LM[2:N, spin, d[1], d[2]] += real.(VV[1:N-1] .* vnorm) 
@@ -212,7 +223,11 @@ function get_inv(rho_LM_target; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, ax
     
     gg = g(grad, V_work_LM[:])
 
-    return ff, gg, f, g, V_work_LM[:], rho_LM, rho_LM_target
+    println("size V_work_LM ", size(V_work_LM))
+    
+    println("size gg ", size(gg))
+    
+#    return ff, gg, f, g, V_work_LM[:], rho_LM, rho_LM_target
     
 #    return missing, missing, VH_LM, rho_LM
     
@@ -226,13 +241,13 @@ function get_inv(rho_LM_target; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, ax
     ret = optimize(f, g, V_work_LM[:], BFGS(), opts)
     #ret = optimize(f, V_work_LM[:], BFGS(), opts)
 
-    if true
+     if true
         f_reg = 1e-16
         
-        weights = 10^3*ones(N-1) .+ 10^8 ./ (rho_LM_target[2:N, :,:,:] .+ 1e-19)
+        weights = 10^3*ones(N-1) .+ 10^4 ./ (rho_LM_target[2:N, :,:,:] .+ 1e-10)
         themin = Optim.minimizer(ret)
         
-        opts = Optim.Options( f_tol = 1e-7, g_tol = 1e-7, iterations = 50, store_trace = true, show_trace = false)    
+        opts = Optim.Options( f_tol = 1e-7, g_tol = 1e-7, iterations = 100, store_trace = true, show_trace = false)    
         println("v2")
         #ret = optimize(f, g, themin, BFGS(), opts)
         ret = optimize(f,  themin, BFGS(), opts)
@@ -252,10 +267,107 @@ end
     
 
 
+function test(rho_LM_target; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, ax = 0.2, bx = 0.5, spherical = false, vext = missing, lmax_rho = missing, hydrogen=false)
+
+    Z, nel, nspin, lmax, lmax_rho, grid, grid1, grid2, invgrid, invgrid1, r, D, D2, w, rall,wall,H_poisson, D1X, D2X, rall_rs, ig1, H_poisson, D2grid, D2Xgrid, D1Xgrid, VEXT, H0_L, Vc, spin_lm, spin_lm_rho = prepare_dft(Z, N, Rmax, ax, bx, fill_str, spherical, vext, lmax_rho)
 
 
+    
+    vals, vR = eigen(H0_L[1][:,:,1,1,1])
+    rho_LM_target =  vR[:,1] .* conj(vR[:,1]) * 0.99
+
+    vects = zeros(Complex{Float64}, N-1, N-1, nspin, lmax+1, 2*lmax+1)
+    vects = real.(vects)
+    HAM = zeros(Complex{Float64}, N-1, N-1, nspin, lmax+1, 2*lmax+1)
+    vals_r = zeros(Float64, N-1, nspin, lmax+1,2*lmax+1)    
+
+    
+    for i = 1:length(spin_lm)
+        spin = spin_lm[i][1]
+        l = spin_lm[i][2]
+        m = spin_lm[i][3]
+        d = FastSphericalHarmonics.sph_mode(l,m)
+        for ll = 0:(lmax_rho)
+            for mm = -ll:ll
+                d2 = FastSphericalHarmonics.sph_mode(ll,mm)
+                #                    VHt += 4*pi*VH_LM[:, d2[1], d2[2]] * real_gaunt_dict[(ll,mm,l,m)] #/ (2*ll+1)
+                #                    V_w_t += V_work_LM[:,spin,d2[1], d2[2]] #* real_gaunt_dict[(ll,mm,l,m)]                    
+            end
+        end
+
+        #            VH_mat = diagm(VHt[2:N])
+        #            V_w_mat = diagm(V_w_t[2:N])
+        
+        if hydrogen
+            Ham = H0_L[l+1] #+ (V_w_mat)
+        else
+            Ham = H0_L[l+1] #+ (VH_mat + V_w_mat)
+        end
+        HAM[:,:,spin,d[1],d[2]] = Ham
+        
+        #            println("size Ham ", size(Ham))
+        vals, v = eigen(Ham)
+
+        #            println("go vals ", vals[1:3])
+        
+        vals_r[:,spin,d[1],d[2]] = real.(vals)
+        vects[:,:,spin,d[1],d[2]] = v
+        
+    end
+
+    
+    rho_LM = zeros(size(rho_LM_target))
+
+    n = sum( real.(conj.(vects[:,1]).* vects[:,1]))
+#    n=1
+    function v(vectsS)
+#        vectsI = zeros(size(vects))
+#        vectsI[:,1] = vectsS
+#        println("size w ", size(w), " " , N, " " , size(vectsS))
+        #        n = sum(wall[2:N].*ig1[2:N] .* real.(conj.(vectsS).* vectsS))
+        n = sum( real.(conj.(vectsS).* vectsS))
+        println("n $n")
+#        n = sum( real.(conj.(vectsS[:,1]).* vectsS[:,1]))
+        rho_LM = real.(conj.(vectsS).* vectsS) / n
+        
+#        rho_LMx, filling, rhor2, rhoR, rhoR2 = assemble_rho_LM(vals_r, vectsI, nel, rall_rs, wall, rho_LM, N, Rmax, D2Xgrid, D1Xgrid, nspin=nspin, lmax=lmax, ig1 = ig1, gga=false)
+
+#        println("size ", size(rho_LM), " " , size(rho_LM_target))
+        return sum((rho_LM - rho_LM_target).^2)
+    end
+    
 
 
+    
+    function gv(vectsS)
+        d = FastSphericalHarmonics.sph_mode(0,0)
+        vectsI = zeros(size(vects))
+        vectsI[:,1] = vectsS
+        vnorm = vectsI[:,1]
+        n = sum( real.(conj.(vnorm[:,1]).* vnorm[:,1]))
+        spin = 1
+        println("g n $n")
+        rho_LM = real.(conj.(vectsS).* vectsS) / n
+        B =  -4* (rho_LM_target  - rho_LM  ) .* (vnorm / n  ) 
+
+        for i = 1:length(vnorm)
+            for j = 1:length(vnorm)            
+                B[i] += 4* (rho_LM_target  - rho_LM  )[j] .* (vnorm[j].^2 .* vnorm[i] / n^2) 
+            end
+        end
+        return B
+#        B = -4*(rho_LM_target  - rho_LM  ) .* vnorm / n
+        
+    end
+                
+    println("n $n")
+    
+    va = v(vects[:,1])
+    gva = gv(vects[:,1])
+    return vects, v, gv
+    
+    
+end
 
 
 

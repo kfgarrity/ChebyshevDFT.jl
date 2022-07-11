@@ -1183,7 +1183,7 @@ function prepare_dft(Z, N, Rmax, ax, bx, fill_str, spherical, vext, lmax_rho)
         lmax_rho = 0
     end
 
-    #=
+    
     begin
         function grid(x)
             return log(bx*x + ax)
@@ -1204,8 +1204,8 @@ function prepare_dft(Z, N, Rmax, ax, bx, fill_str, spherical, vext, lmax_rho)
             return grid1(x).^-1
         end
     end
-=#
-    begin
+
+#=    begin
 
         println("linear grid")
         function grid(x)
@@ -1227,7 +1227,7 @@ function prepare_dft(Z, N, Rmax, ax, bx, fill_str, spherical, vext, lmax_rho)
             return 1.0
         end
     end
-    
+=#    
     
 #    println("fakegrid")
     
