@@ -1,4 +1,5 @@
 using ChebyshevQuantum
+using ChebyshevDFT
 using Test
 using QuadGK
 tol_var=1e-8
@@ -90,28 +91,30 @@ end
     
 #    ZZ = ChebyshevDFT.AngMom.construct_real_gaunt_indirect(lmax=6);
 
-    c = ChebyshevDFT.AngMom.inds[(1,0)]
+#    c = ChebyshevDFT.AngMom.inds[(1,0)]
     
     b = QuadGK.quadgk(p-> QuadGK.quadgk(t-> sin(t)* ( pz(t,p)*s(t,p)*pz(t,p)) , 0, pi,atol=1e-6)[1], 0,2*pi, atol=1e-6)[1]
 
-    
+    @test abs(b - ChebyshevDFT.AngMom.real_gaunt_dict[(0,0,1,0)]) < tol_var
 
     #    d = FastSphericalHarmonics.sph_mode(0,0)
     
 #    display(ZZ[d[1],d[2],c])
-    println("a ", ChebyshevDFT.AngMom.real_gaunt_dict[(0,0,1,0)])
-    println("b " , b)
+#    println("a ", ChebyshevDFT.AngMom.real_gaunt_dict[(0,0,1,0)])
+#    println("b " , b)
     
 
 #    c = ChebyshevDFT.AngMom.inds[(1,0)]
     
     b = QuadGK.quadgk(p-> QuadGK.quadgk(t-> sin(t)* ( pz(t,p)*dz2(t,p)*pz(t,p)) , 0, pi,atol=1e-6)[1], 0,2*pi, atol=1e-6)[1]
 
+    @test abs(ChebyshevDFT.AngMom.real_gaunt_dict[(2,0,1,0)]  - b) < tol_var
+    
 #    d = FastSphericalHarmonics.sph_mode(2,0)
     
 #    display(ZZ[d[1],d[2],c])
-    println("a ", ChebyshevDFT.AngMom.real_gaunt_dict[(2,0,1,0)])
-    println("b " , b)
+#    println("a ", ChebyshevDFT.AngMom.real_gaunt_dict[(2,0,1,0)])
+#    println("b " , b)
     
     
 end

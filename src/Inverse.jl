@@ -154,25 +154,25 @@ function get_inv(rho_LM_target; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, ax
             spin = spin_lm[i][1]
             l = spin_lm[i][2]
             m = spin_lm[i][3]
-            d = FastSphericalHarmonics.sph_mode(l,m)
+            d1 = FastSphericalHarmonics.sph_mode(l,m)
 
 
-            H[:,:] = HAM[:,:,spin,d[1],d[2]] 
+            H[:,:] = HAM[:,:,spin,d1[1],d1[2]] 
 
             for n = 1:(N-1)
-                if filling[n, spin, d[1], d[2]] < 1e-8
+                if filling[n, spin, d1[1], d1[2]] < 1e-8
 #                    println("break, ", [n, spin, d[1], d[2]])
                     break
                 end
 #                println("vals_r ", vals_r[n, spin, d[1], d[2]])
 
-                vnorm = real(vects[:,n,spin,d[1],d[2]]) 
+                vnorm = real(vects[:,n,spin,d1[1],d1[2]]) 
 
 #                println("val ", vals_r[1], " ", vects[:,1]' * H * vects[:,1], " " , vnorm'*H*vnorm)
 #                
 #                println("vnorm ", sum(vnorm.^2 .* wall[2:N] .* ig1[2:N]))
                 
-                MAT[1:(N-1), 1:(N-1) ] = H' - I(N-1)*vals_r[n, spin, d[1], d[2]]
+                MAT[1:(N-1), 1:(N-1) ] = H' - I(N-1)*vals_r[n, spin, d1[1], d1[2]]
                 MAT[1:(N-1), N] = 2.0*vnorm
                 MAT[N,1:(N-1)] = vnorm'
         
@@ -187,21 +187,28 @@ function get_inv(rho_LM_target; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, ax
 
                 norm = sum(vnorm.^2 .* ig1[2:N] .* wall[2:N])
 
-                B[1:(N-1)] =  (4*pi)^-(3/2)  *    4.0*weights[:, spin, d[1], d[2]]  .* (rho_LM_target[2:N, spin, d[1], d[2]] - rho_LM[2:N, spin, d[1], d[2]]  ) .* (
-                    vnorm / norm   ) * filling[n,spin,d[1],d[2]]
+                B[1:(N-1)] =  (4*pi)^-(1)  *    4.0*weights[:, spin, d1[1], d1[2]]  .* (rho_LM_target[2:N, spin, d1[1], d1[2]] - rho_LM[2:N, spin, d1[1], d1[2]]  ) .* (
+                    vnorm / norm   ) * filling[n,spin,d1[1],d1[2]]
 
                 #- 0.0*vnorm.^1  .* ig1[2:N] .* wall[2:N] * sum(vnorm.^2) / sum(vnorm.^2 .* ig1[2:N] .* wall[2:N])^2
                 for i = 1:length(vnorm)
                     for j = 1:length(vnorm)            
-                        B[i] += -(4*pi)^-(3/2) * 4.0* weights[j, spin, d[1], d[2]]* (rho_LM_target[2:N, spin, d[1], d[2]] - rho_LM[2:N, spin, d[1], d[2]]  )[j] .* (vnorm[j].^2 .* vnorm[i].* ig1[i] .* wall[i] / norm^2  ) * filling[n,spin,d[1],d[2]]
+                        B[i] += -(4*pi)^-(1) * 4.0* weights[j, spin, d1[1], d1[2]]* (rho_LM_target[2:N, spin, d1[1], d1[2]] - rho_LM[2:N, spin, d1[1], d1[2]]  )[j] .* (vnorm[j].^2 .* vnorm[i].* ig1[i] .* wall[i] / norm^2  ) * filling[n,spin,d1[1],d1[2]]
                     end
                 end
 
-                println("hi")
+        #        println("hi")
                 
                 VV =  MAT \ B
-                
-                grad_LM[2:N, spin, d[1], d[2]] += real.(VV[1:N-1] .* vnorm) 
+                for ll = 0:(lmax*2)
+                    for mm = -ll:ll
+                        d = FastSphericalHarmonics.sph_mode(ll,mm)
+                        grad_LM[2:N, spin, d[1], d[2]] += real.(VV[1:N-1] .* vnorm) *  real_gaunt_dict[(ll,mm,l,m)]                         
+                    end
+                end
+                        #                                rho[2:N,spin, d[1], d[2]] += t * real_gaunt_dict[(ll,mm,l,m)]
+
+#                grad_LM[2:N, spin, d[1], d[2]] += real.(VV[1:N-1] .* vnorm) 
             end
         end
         grad[:] = grad_LM[:]
