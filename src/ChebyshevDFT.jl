@@ -22,4 +22,6 @@ include("SCF.jl")
 include("Inverse.jl")
 #include("Search.jl")
 
+include("Galerkin.jl")
+
 end # module

@@ -78,12 +78,14 @@ end
 @testset "test b spin non-sphere" begin
 
     @suppress begin
-        energy_lda_b_nist = -24.6122090928329
+        energy_lda_b_helfem = -24.3560541363
         
         
-        ret  = ChebyshevDFT.SCF.DFT_spin_l_grid_LM(Z=5.0,  fill_str = "Be \n 2 1 1 1 0", hydrogen=false, Rmax = 50, N = 50, spherical = false, exc = :pbe, lmax_rho=2);
+        energy_lda_sym,converged, vals_r_lda, vects, rho_LM_lda, rall_rs, wall, rhor2_pbe, VH_LM_ref_ldat  = ChebyshevDFT.SCF.DFT_spin_l_grid_LM(Z=5.0,  fill_str = "Be \n 2 1 1 1 0", hydrogen=false, Rmax = 50, N = 50, spherical = false, exc = :lda, lmax_rho=8, lmax = 2, symmetry = true);
 
-        @test abs(energy_lda_b_nist - ret[1]) < 1e-4
+        energy_lda,converged, vals_r_lda, vects, rho_LM_lda, rall_rs, wall, rhor2_pbe, VH_LM_ref_ldat  = ChebyshevDFT.SCF.DFT_spin_l_grid_LM(Z=5.0,  fill_str = "Be \n 2 1 1 1 0", hydrogen=false, Rmax = 50, N = 50, spherical = false, exc = :lda, lmax_rho=8, lmax = 2, symmetry = false, rho_init = rho_LM_lda);
+        
+        @test abs(energy_lda - energy_lda_b_helfem) < 1e-5
 
     end
 

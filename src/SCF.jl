@@ -1517,14 +1517,17 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
 
         drho_LM = zeros(size(rho_LM))
 
+        hamsize=0
+        for l = 0:lmax
+            hamsize += (N-1) * (2*l+1)
+        end
+        Ham = zeros(hamsize,hamsize)
+
+        
         if symmetry
             vects = zeros(Complex{Float64}, N-1, N-1, nspin, lmax+1, 2*lmax+1)
         else
-            hamsize=0
-            for l = 0:lmax
-                hamsize += (N-1) * (2*l+1)
-            end
-            Ham = zeros(hamsize,hamsize)
+
             vects = zeros(Complex{Float64}, hamsize, N-1, nspin, lmax+1, 2*lmax+1)
             
         end
@@ -1682,7 +1685,11 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
             for l = 0:lmax
                 for m = -l:l
                     d = FastSphericalHarmonics.sph_mode(l,m)
-                    println("ITER $iter vals spin =  $spin l = $l m = $m   ", vals_r[1:min(6, size(vals_r)[1]), spin, d[1],d[2]])
+                    if m < 0
+                        println("ITER $iter vals spin =  $spin l = $l m = $m   ", vals_r[1:min(6, size(vals_r)[1]), spin, d[1],d[2]])
+                    else
+                        println("ITER $iter vals spin =  $spin l = $l m = $m    ", vals_r[1:min(6, size(vals_r)[1]), spin, d[1],d[2]])
+                        end
                 end
             end
         end
@@ -1776,7 +1783,7 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
 
     #    return energy,converged, vals_r, vects, rho_LM, rall_rs, wall.*ig1, rhor2, vlda_LM, drho_LM, D1Xgrid, va, rhoR, rhoR2
 
-    return energy,converged, vals_r, vects, rho_LM, rall_rs, wall.*ig1, rhoR2, VH_LM, rho_fn, rho_fn2, grid
+    return energy,converged, vals_r, vects, rho_LM, rall_rs, wall.*ig1, rhoR2, VH_LM, rho_fn, rho_fn2, grid, Ham
     
 end    
 
@@ -1831,7 +1838,9 @@ end
 
 
 function solve_big(spin_lm, VH_LM, vlda_LM, H0_L, vals_r, vects, lmax_rho, N, hydrogen, nspin, Ham)
-            
+
+    println("SOLVE BIG xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx ")
+    
     #        @threads 
     lmax = length(H0_L) - 1
 
@@ -1892,7 +1901,7 @@ function solve_big(spin_lm, VH_LM, vlda_LM, H0_L, vals_r, vects, lmax_rho, N, hy
 #                println("x ", indN .+ (N-1)*ind_arr[(l1,m1)], " y ", indN .+ (N-1)*ind_arr[(l2,m2)])
                 
                 if l1 == l2 && m1 == m2
-                    Ham[indN .+ (N-1)*ind_arr[(l1,m1)], indN .+ (N-1)*ind_arr[(l2,m2)]] += H0_L[l1+1] + I(N-1) * 1e-20 * (l1 + m1*0.1)
+                    Ham[indN .+ (N-1)*ind_arr[(l1,m1)], indN .+ (N-1)*ind_arr[(l2,m2)]] += H0_L[l1+1] + I(N-1) * 0e-4 * (l1 + m1*0.1)
                 end
                 if !hydrogen
                     
@@ -1938,13 +1947,15 @@ function solve_big(spin_lm, VH_LM, vlda_LM, H0_L, vals_r, vects, lmax_rho, N, hy
         
         vals, v = eigen(Ham)
 
-#        println("eig orthog")
-#        for i = 1:7
-#            for j = 1:7
-#                println("$i $j ", v[:,i]'*v[:,j])
-#            end
-#        end
-        
+        println("spin $spin sb1 vals ", vals[1:10])
+        println()
+        println("eig orthog")
+        for i = 1:7
+            for j = 1:7
+                println("$i $j ", v[:,i]'*v[:,j])
+            end
+        end
+        println()
         
 #        println("Ham")
 #        println(Ham)
@@ -1978,6 +1989,11 @@ function solve_big(spin_lm, VH_LM, vlda_LM, H0_L, vals_r, vects, lmax_rho, N, hy
                 v2_2nd = 0.0
                 best_ind = [1,1]
                 best_lm = [0,0]
+
+                if eig_count < 10
+                    println("eig $eig_count $(real(vals[eig_count]))")
+                end
+                
                 for i = 1:length(spin_lm)
                     spin1 = spin_lm[i][1]
                     l1 = spin_lm[i][2]
@@ -1989,11 +2005,6 @@ function solve_big(spin_lm, VH_LM, vlda_LM, H0_L, vals_r, vects, lmax_rho, N, hy
                     
                     d = FastSphericalHarmonics.sph_mode(l1,m1)
 
-#                    if eig_count < 10
-#
-#                        println("eig_count $eig_count $spin1 , lm $l1 $m1 ", sum(abs.(v2[indN .+ (N-1)*ind_arr[(l1,m1)], eig_count])))
-#                        
-#                    end
                     
                     vtemp  = sum(abs.(v2[indN .+ (N-1)*ind_arr[(l1,m1)], eig_count]))
                     if vtemp > v2_max && !(d in dvars)
@@ -2017,6 +2028,8 @@ function solve_big(spin_lm, VH_LM, vlda_LM, H0_L, vals_r, vects, lmax_rho, N, hy
                 ind_count[best_ind] += 1
                 if ind_count[best_ind] <= N-1
                     vals_r[ind_count[best_ind],spin,best_ind[1],best_ind[2]] = real(vals[eig_count])
+
+
                     #vects[:,ind_count[best_ind],spin,best_ind[1],best_ind[2]] = v[indN .+ (N-1)*ind_arr[(best_lm[1],best_lm[2])],eig_count]
                     vects[:,ind_count[best_ind],spin,best_ind[1],best_ind[2]] = v[:,eig_count]
 #                    println("add vects $([ind_count[best_ind],spin,best_ind[1],best_ind[2]]) ", sum(v[:,eig_count] .* conj.(v[:,eig_count])))

@@ -9,6 +9,7 @@ using Base.Threads
 
 gaunt_dict = Dict{NTuple{6,Int64}, Float64}()
 real_gaunt_dict = Dict{NTuple{4,Int64}, Float64}()
+real_gaunt_dict2 = Dict{NTuple{6,Int64}, Float64}()
 Y_dict = Dict{NTuple{5,Int64}, Float64}()
 Ytheta_dict = Dict{NTuple{5,Int64}, Float64}()
 Yphi_dict = Dict{NTuple{5,Int64}, Float64}()
@@ -23,11 +24,20 @@ function construct_real_gaunt_indirect(; lmax=12)
     Ytest = SphericalHarmonics.computeYlm(0.0, 0.0, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())
     s = length(Ytest)
     YY = zeros(length(THETA), length(PHI), s)
+
+    YY2 = zeros(length(THETA), length(PHI), s, s)
     
     for (i,theta) in enumerate(THETA)
         for (j,phi) in enumerate(PHI)
             Y = SphericalHarmonics.computeYlm(theta, phi, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())
             YY[i,j,:] = Y[:].^2
+
+#            println(size(Y))
+#            println(size(Y[:]*Y[:]'))
+#            println(size(Y[:]'*Y[:]))
+#            println(size(YY2[i,j,:,:]))
+            YY2[i,j,:,:] = Y[:]*Y[:]'
+            
         end
     end
 
@@ -36,6 +46,13 @@ function construct_real_gaunt_indirect(; lmax=12)
         ZZ[:,:,ss] = FastSphericalHarmonics.sph_transform(YY[:,:,ss])    
     end
 
+    ZZ2 = zeros(size(YY2))
+    for ss1 = 1:s
+        for ss2 = 1:s
+            ZZ2[:,:,ss1, ss2] = FastSphericalHarmonics.sph_transform(YY2[:,:,ss1, ss2])    
+        end
+    end
+    
     inds = Dict()
     c=0
     for l = 0:lmax
@@ -51,12 +68,34 @@ function construct_real_gaunt_indirect(; lmax=12)
                 for m2 = -l2:l2
                     d = FastSphericalHarmonics.sph_mode(l1,m1)
 #                    println("$l1 $m1 $l2 $m2 | $d ", inds[(l2,m2)])
-                    real_gaunt_dict[(l1,m1,l2,m2)] = ZZ[d[1], d[2], inds[(l2,m2)]]
+                    if abs(ZZ[d[1], d[2], inds[(l2,m2)]]) > 1e-12
+                        real_gaunt_dict[(l1,m1,l2,m2)] = ZZ[d[1], d[2], inds[(l2,m2)]]
+                    else
+                        real_gaunt_dict[(l1,m1,l2,m2)] = 0.0
+                    end                        
                 end
             end
         end
     end
-    
+
+    for l1 = 0:lmax
+        for m1 = -l1:l1
+            for l2 = 0:lmax
+                for m2 = -l2:l2
+                    for l3 = 0:lmax
+                        for m3 = -l3:l3
+                            d = FastSphericalHarmonics.sph_mode(l1,m1)
+                            if abs(ZZ2[d[1], d[2], inds[(l2,m2)], inds[(l3,m3)]]) > 1e-12
+                                real_gaunt_dict2[(l1,m1,l2,m2,l3,m3)] = ZZ2[d[1], d[2], inds[(l2,m2)], inds[(l3,m3)]]
+                            else
+                                real_gaunt_dict2[(l1,m1,l2,m2,l3,m3)] = 0.0
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
     return ZZ
     
 end
