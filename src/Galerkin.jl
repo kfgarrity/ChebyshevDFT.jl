@@ -9,8 +9,12 @@ using QuadGK
 function hydrogen(Z, N, PTS, W, Bvals,S, d2; a = 0.0, b = 20.0, M = -1)
 
     if M == -1
-        M = min(200, Int64(round(N * 1.5 + 3)))
+        M =  Int64(round(N * 1.5 + 3))
     end
+    M = min(M, size(PTS)[1])
+
+    println("old M $M ")
+    
 #    PINT = pre_do_integral(N, PTS, W, Bvals)    
 
     function V(r)
@@ -123,6 +127,7 @@ end
 
 function do_integral(fn, N, PTS, W, Bvals; M = 199)
 
+    println("do int $N $M")
     INT = zeros(N-1, N-1)
     f = fn.(@view PTS[M, 2:M+2]) .* (@view W[M, 2:M+2])
     @threads for n1 = 1:(N-1)
@@ -208,22 +213,28 @@ end
 
 
 
-function setup_integral_mats(Nmax)
+function setup_integral_mats(NN, Nmax)
 
     PTS = zeros(Nmax, Nmax+3)
     W = zeros(Nmax, Nmax+3)
 
-    Bvals = zeros(Nmax,Nmax,Nmax+3)
+    Bvals = zeros(Nmax,NN,Nmax+3)
     
     B = get_cheb_bc(Nmax);
-    
-    @threads for N = 1:Nmax
 
+    nnX = 1
+    function get(x)
+        return B[nnX](x)
+    end
+    
+    for N = 1:Nmax
+        println("N $N")
         w, pts = setup_integrals(N);
         PTS[N,1:N+3] = pts
         W[N,1:N+3] = w
-        for nn = 1:(N-1)
-            Bvals[N, nn, 1:N+3] = B[nn].(pts)
+        for nn = 1:(NN-1)
+            nnX = nn
+            Bvals[N, nn, 1:N+3] = get.(Float64.(pts))
         end
         
     end
@@ -237,11 +248,11 @@ function setup_integrals(N)
 
     N = N+2
     
-    pts = -cos.( BigFloat(pi)*(0:N) / N)    
+    pts = -cos.( Float64(pi)*(0:N) / N)    
     Nd2 = Int64(floor(N/2))
 #    pts = getCpts(N)
     w = zeros(N+1)
-    z = zeros(BigFloat, Nd2*2+1)
+    z = zeros(Float64, Nd2*2+1)
 
     for m = 0:Nd2
         z[:] .= 0.0
@@ -275,7 +286,7 @@ end
 
 function get_cheb_bc(N)
 
-    B = basis.(Chebyshev{BigFloat}, 0:N);
+    B = basis.(Chebyshev{Float64}, 0:N);
 
     B2 = []
     for n = 3:N+1
@@ -362,9 +373,9 @@ function f(V, B)
 end
 
 
-function get_cheb_bc_grid(N, r)
+function get_cheb_bc_grid(N, r; vartype=Float64)
 
-    B = basis.(Chebyshev{Float64}, 0:N);
+    B = basis.(Chebyshev{vartype}, 0:N);
 
     B2 = []
     for n = 3:N+1
@@ -376,49 +387,104 @@ function get_cheb_bc_grid(N, r)
     end
 
     B3 = []
-    for b in B2
+    for (c, b) in enumerate(B2)
         #push!(B3, b / sqrt(integrate(b^2, -1, 1)))
-
-        push!(B3, b / sqrt(QuadGK.quadgk(x->b(r(x))^2, -1,1)[1]))
-
+#        println("b $b r(0.1) $(r(0.1))")
+        println("c $c")
+        function g(x)
+            return b(r(x))^2
+        end
+        push!(B3, b / sqrt(QuadGK.quadgk(g, -1,1, rtol=1e-10)[1]))
+        
     end
     return B3
+    
+end
+
+function get_r(α)
+
+    b = 1.0
+    a = -1.0
+    β = (b-a) / ((exp(α * (b-a))- 1 ) )
+    function r(x)
+        if abs(α) < 1e-5
+            return x
+        else
+            return β*(exp(α*(x-a)) - 1 )  + a
+        end
+    end
+
+    return r
     
 end
 
 function stuff(N, α)
     #C = basis.(Chebyshev{Float64}, 0:N)
 
-    b = 1.0
-    a = -1.0
-    β = (b-a) / ((exp(α * (b-a))- 1 ) )
-    function r(x)
-        return β*(exp(α*(x-a)) - 1 )  + a
-    end
-    
+#    b = 1.0
+#    a = -1.0
+#    β = (b-a) / ((exp(α * (b-a))- 1 ) )
+#    function r(x)
+#        return β*(exp(α*(x-a)) - 1 )  + a
+#    end
+
+    r = get_r(α)
     
     B = get_cheb_bc_grid(N, r)
     S = zeros(length(B), length(B))
-    for (c1, b1) in enumerate(B)
-        for (c2, b2) in enumerate(B)
-            S[c1,c2] = QuadGK.quadgk(x->b1(r(x))*b2(r(x)), -1,1)[1]
+
+    C1 = 1
+    C2 = 1
+    
+    function over(x)
+
+        return B[C1](r(x))*B[C2](r(x))
+    end
+
+    println("overlaps")
+    for c1 = 1:length(B)
+        for c2 = 1:length(B)
+
+            C1=c1
+            C2=c2
+#    for (c1, b1) in enumerate(B)
+#        for (c2, b2) in enumerate(B)
+            S[c1,c2] = QuadGK.quadgk(over, -1,1, rtol=1e-10)[1]
             #p = Polynomial(b1*b2)
             #S[c1,c2] = QuadGK.quadgk(p, -1,1)[1]
         end
     end
     
     d2 = zeros(length(B), length(B))
+
+    B2 = []
     for (c1, b1) in enumerate(B)
         b1_1 = bb -> ForwardDiff.derivative(aa->b1(r(aa)), bb)
         b1_2 = cc -> ForwardDiff.derivative(b1_1, cc)
+        push!(B2, b1_2)
+    end
+    function d2int(x)
+        return B[C1](r(x))*B2[C2](x)
+    end
+
+    println("derivs")
+    for c1 in 1:length(B)
+    #    for (c1, b1) in enumerate(B)
+#        b1_1 = bb -> ForwardDiff.derivative(aa->b1(r(aa)), bb)
+#        b1_2 = cc -> ForwardDiff.derivative(b1_1, cc)
         for (c2, b2) in enumerate(B)
-            d2[c1,c2] = QuadGK.quadgk(x->b1_2(x)*b2(r(x)), -1,1)[1]
+            C1=c1                                                                                     
+            C2=c2   
+            d2[c1,c2] = QuadGK.quadgk(d2int, -1,1, rtol=1e-10)[1]
+
+
             #p = Polynomial(b1*b2)
             #S[c1,c2] = QuadGK.quadgk(p, -1,1)[1]
         end
     end
     
-    
+    S = (S+S')/2.0
+    d2 = (d2 + d2')/2.0
             
 
     return S, d2
@@ -426,5 +492,114 @@ end
 
 
 
+function hydrogen_grid(Z, N, PTS, W, Bvals,S, d2, vint; a = 0.0, b = 20.0, M = -1)
+    println("hgrid")
+#    M = 35
+#    M = N
+
+    if M > size(PTS)[1]
+        M = size(PTS)[1]
+    end
+    
+    if M == -1
+        M = minimum(Int64(round(N * 1.5 + 3)), size(PTS)[1] )
+    end
+
+    println("M $M")
+    
+    function V(r)
+        return -Z / r
+    end
+
+    function X(r)
+        return -1.0 + 2 * (a - r)/(a-b)
+    end
+    function R(x)
+        return a .+ (x .- -1.0)*(b-a) / 2.0
+    end
+    
+
+    
+    function Vx(x)
+        return V(R(x))
+    end
+
+#    return Vx, R, X, V
+    
+#    INT = do_integral(
+    @time INT = do_integral(Vx, N, PTS, W, Bvals; M = M)
+
+    #@time vals, vects = eigen(-0.5*(d2[1:N-1, 1:N-1] /  (b-a)^2*2^2  ) + Z*vint[1:N-1, 1:N-1] , (S[1:N-1, 1:N-1]))
+    @time vals, vects = eigen(-0.5*(d2[1:N-1, 1:N-1] /  (b-a)^2*2^2  ) + INT, (S[1:N-1, 1:N-1]))
+
+    return vals,  Vx
+
+end
+
+function setup_integral_mats_grid(NN, Nmax, α)
+
+    println("setup")
+    @time begin
+        #Nmax = Int64(round(NN * 2.0 + 3))
+        PTS = zeros(Nmax, Nmax+3)
+        W = zeros(Nmax, Nmax+3)
+
+        Bvals = zeros(Nmax,NN,Nmax+3)
+        
+        r = get_r(α)
+        
+        B = get_cheb_bc_grid(Nmax, r)
+    end
+
+    println("loop")
+    nnX = 1
+    function get(x)
+        return B[nnX](r(x))
+    end
+    
+    @time for N = 1:Nmax
+    #for N = [Nmax]
+        println("N $N")
+
+        @time w, pts = setup_integrals(N);
+
+        PTS[N,1:N+3] = pts
+        W[N,1:N+3] = w
+        @time for nn = 1:(NN-1)
+            nnX = nn
+            #Bvals[N, nn, 1:N+3] = B[nn].(r.(Float64.(pts)))
+            Bvals[N, nn, 1:N+3] = get.(Float64.(pts))
+
+
+            #Bvals[N, nn, 1:N+3] = B[nn].(r.(pts))
+        end
+        
+    end
+
+    return PTS, W, Bvals
+        
+end
+
+
+function do_integral_direct(V, B, r)
+
+    #B = get_cheb_bc(N, vartype=Float64)
+    VV = zeros(length(B), length(B))
+
+    function core(x, a1,a2)
+        return B[a1](r(x))*B[a2](r(x))*V(x)
+    end
+    
+    for c1 in 1:length(B)
+        println("c1 $c1")
+        b1 = B[c1]
+        for (c2, b2) in enumerate(B)
+            VV[c1,c2] = QuadGK.quadgk(x->b1(r(x))*b2(r(x))*V(x), -1,1)[1]
+            #VV[c1,c2] = QuadGK.quadgk(x->core(x, c1,c2), -1, 1, rtol = 1e-10)[1]
+        end
+    end
+
+    return VV
+end
 
 end #end module
