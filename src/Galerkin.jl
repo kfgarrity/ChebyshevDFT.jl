@@ -218,7 +218,7 @@ function setup_integral_mats(NN, Nmax)
     PTS = zeros(Nmax, Nmax+3)
     W = zeros(Nmax, Nmax+3)
 
-    Bvals = zeros(Nmax,NN,Nmax+3)
+    Bvals = zeros(Nmax,NN-1,Nmax+3)
     
     B = get_cheb_bc(Nmax);
 
@@ -401,6 +401,31 @@ function get_cheb_bc_grid(N, r; vartype=Float64)
     
 end
 
+function get_r2(α, γ)
+
+    b = 1.0
+    a = -1.0
+    β = (b-a) / ((exp(α * (b-a))- 1 ) )
+    function r(x)
+        if abs(α) < 1e-5
+            return x
+        else
+            return γ*(β*(exp(α*(x-a)) - 1 )  + a) + (1-γ)*x
+        end
+    end
+
+    function invr(rr)
+        if abs(α) < 1e-5
+            return rr
+        else
+            return log( (rr - a)/β + 1)/α + a
+        end
+    end
+    
+    return r, invr
+    
+end
+
 function get_r(α)
 
     b = 1.0
@@ -414,9 +439,39 @@ function get_r(α)
         end
     end
 
-    return r
+    function invr(rr)
+        if abs(α) < 1e-5
+            return rr
+        else
+            return log( (rr - a)/β + 1)/α + a
+        end
+    end
+    
+    return r, invr
     
 end
+
+function get_r_quad(α, β)
+
+    b = 1.0
+    a = -1.0
+
+    function r(x)
+        return β*x^4 + α*x^2 + x - α
+    end
+
+    function invr(rr)
+        if abs(α) < 1e-5
+            return rr
+        else
+            return log( (rr - a)/β + 1)/α + a
+        end
+    end
+    
+    return r, invr
+    
+end
+
 
 function stuff(N, α)
     #C = basis.(Chebyshev{Float64}, 0:N)
@@ -428,7 +483,7 @@ function stuff(N, α)
 #        return β*(exp(α*(x-a)) - 1 )  + a
 #    end
 
-    r = get_r(α)
+    r, invr = get_r(α)
     
     B = get_cheb_bc_grid(N, r)
     S = zeros(length(B), length(B))
@@ -492,7 +547,7 @@ end
 
 
 
-function hydrogen_grid(Z, N, PTS, W, Bvals,S, d2, vint; a = 0.0, b = 20.0, M = -1)
+function hydrogen_grid(Z, N, PTS, W, Bvals,S, d2, vint; a = 0.0, b = 20.0, M = -1, l = 0)
     println("hgrid")
 #    M = 35
 #    M = N
@@ -508,7 +563,7 @@ function hydrogen_grid(Z, N, PTS, W, Bvals,S, d2, vint; a = 0.0, b = 20.0, M = -
     println("M $M")
     
     function V(r)
-        return -Z / r
+        return -Z / r + 0.5*l*(l+1)/r^2
     end
 
     function X(r)
@@ -532,7 +587,7 @@ function hydrogen_grid(Z, N, PTS, W, Bvals,S, d2, vint; a = 0.0, b = 20.0, M = -
     #@time vals, vects = eigen(-0.5*(d2[1:N-1, 1:N-1] /  (b-a)^2*2^2  ) + Z*vint[1:N-1, 1:N-1] , (S[1:N-1, 1:N-1]))
     @time vals, vects = eigen(-0.5*(d2[1:N-1, 1:N-1] /  (b-a)^2*2^2  ) + INT, (S[1:N-1, 1:N-1]))
 
-    return vals,  Vx
+    return vals#,  Vx
 
 end
 
@@ -544,9 +599,11 @@ function setup_integral_mats_grid(NN, Nmax, α)
         PTS = zeros(Nmax, Nmax+3)
         W = zeros(Nmax, Nmax+3)
 
-        Bvals = zeros(Nmax,NN,Nmax+3)
+        Bvals = zeros(Nmax,NN-1,Nmax+3)
         
-        r = get_r(α)
+        r, invr = get_r(α)
+
+        dr = xx-> ForwardDiff.derivative(r, xx)
         
         B = get_cheb_bc_grid(Nmax, r)
     end
@@ -563,12 +620,73 @@ function setup_integral_mats_grid(NN, Nmax, α)
 
         @time w, pts = setup_integrals(N);
 
+#        PTS[N,1:N+3] = r.(pts)
+#        W[N,1:N+3] = w .* dr.(pts)
+
         PTS[N,1:N+3] = pts
-        W[N,1:N+3] = w
+        W[N,1:N+3] = w 
+        
         @time for nn = 1:(NN-1)
             nnX = nn
             #Bvals[N, nn, 1:N+3] = B[nn].(r.(Float64.(pts)))
+
+            #Bvals[N, nn, 1:N+3] = get.(r.(Float64.(pts)))
             Bvals[N, nn, 1:N+3] = get.(Float64.(pts))
+
+
+            #Bvals[N, nn, 1:N+3] = B[nn].(r.(pts))
+        end
+        
+    end
+
+    return PTS, W, Bvals
+        
+end
+
+
+function setup_integral_mats_grid_new(NN, Nmax, α)
+
+    println("setup")
+    @time begin
+        #Nmax = Int64(round(NN * 2.0 + 3))
+        PTS = zeros(Nmax, Nmax+3)
+        W = zeros(Nmax, Nmax+3)
+
+        Bvals = zeros(Nmax,NN-1,Nmax+3)
+        
+        r, invr = get_r(α)
+
+        dinvr = xx-> ForwardDiff.derivative(invr, xx)
+        
+        B = get_cheb_bc_grid(Nmax, r)
+    end
+
+    println("loop")
+    nnX = 1
+    function get(x)
+        return B[nnX](x)
+    end
+    
+    @time for N = 1:Nmax
+    #for N = [Nmax]
+        println("N $N")
+
+        @time w, pts = setup_integrals(N);
+
+        PTS[N,1:N+3] = invr.(pts)
+        W[N,1:N+3] = w .* dinvr.(pts)
+
+#        PTS[N,1:N+3] = pts
+#        W[N,1:N+3] = w 
+        
+        @time for nn = 1:(NN-1)
+            nnX = nn
+            #Bvals[N, nn, 1:N+3] = B[nn].(r.(Float64.(pts)))
+
+            Bvals[N, nn, 1:N+3] = get.(Float64.(pts))
+            
+            #Bvals[N, nn, 1:N+3] = get.(invr.(Float64.(pts)))
+            #Bvals[N, nn, 1:N+3] = get.(Float64.(pts))
 
 
             #Bvals[N, nn, 1:N+3] = B[nn].(r.(pts))
@@ -601,5 +719,39 @@ function do_integral_direct(V, B, r)
 
     return VV
 end
+
+
+function dft(Z, N, PTS, W, Bvals,S, d2, vint; a = 0.0, b = 20.0, M = -1, l = 0)
+    if M > size(PTS)[1]
+        M = size(PTS)[1]
+    end
+    if M == -1
+        M = minimum(Int64(round(N * 1.5 + 3)), size(PTS)[1] )
+    end
+    println("M $M")
+    
+    function V(r)
+        return -Z / r + 0.5*l*(l+1)/r^2
+    end
+    function X(r)
+        return -1.0 + 2 * (a - r)/(a-b)
+    end
+    function R(x)
+        return a .+ (x .- -1.0)*(b-a) / 2.0
+    end
+    function Vx(x)
+        return V(R(x))
+    end
+
+    @time INT = do_integral(Vx, N, PTS, W, Bvals; M = M)
+
+    #@time vals, vects = eigen(-0.5*(d2[1:N-1, 1:N-1] /  (b-a)^2*2^2  ) + Z*vint[1:N-1, 1:N-1] , (S[1:N-1, 1:N-1]))
+    @time vals, vects = eigen(-0.5*(d2[1:N-1, 1:N-1] /  (b-a)^2*2^2  ) + INT, (S[1:N-1, 1:N-1]))
+
+        
+    return vals#,  Vx
+
+end
+
 
 end #end module

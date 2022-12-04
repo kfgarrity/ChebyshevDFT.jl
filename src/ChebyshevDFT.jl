@@ -24,5 +24,6 @@ include("Inverse.jl")
 
 include("Galerkin.jl")
 include("G2.jl")
+include("GalerkinDFT.jl")
 
 end # module
