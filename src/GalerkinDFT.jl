@@ -151,20 +151,24 @@ function prepare(Z, fill_str, lmax, exc, rmax, N, M, PTS, W, Bvals, d2, s)
         push!(VC, Vc)
     end
 
-    VECTS = zeros(Complex{Float64}, N-1,N-1, nspin, lmax+1,2*(lmax+1) )
-    VALS = zeros(N-1,nspin, lmax+1,2*(lmax+1) )
+    VECTS = zeros(Complex{Float64}, N-1,N-1, nspin, lmax+1,2*(lmax)+1 )
+    VALS = zeros(N-1,nspin, lmax+1,2*(lmax)+1 )
 
 
     D2 =-0.5* d2[1:N-1, 1:N-1] /  (b-a)^2*2^2
     S = s[1:N-1, 1:N-1]
-        
+
+    invsqrtS = inv(sqrt(S))
+    
 #    println("size VECTS ", size(VECTS))
 
     for ll = 0:lmax
         vals, vects = eigen(D2 + VC[ll+1], S)
+        #vals, vects = eigen( invsqrtS*(D2 + VC[ll+1])*invsqrtS)
+        
 #        println("vals $ll $(vals[1:3])")
         for spin = 1:nspin
-            for m = 1:2*(ll+1)
+            for m = 1:(2*(ll)+1)
 #                println("spin $spin ll $ll m $m , ", size(vects))
                 VECTS[:,:,spin, ll+1, m] = vects
                 VALS[:,spin, ll+1, m] = vals
@@ -172,7 +176,7 @@ function prepare(Z, fill_str, lmax, exc, rmax, N, M, PTS, W, Bvals, d2, s)
         end
     end
   
-    return Z, nel, nspin, lmax, VC, D2, S, VECTS, funlist, gga
+    return Z, nel, nspin, lmax, VC, D2, S, invsqrtS, VECTS, VALS, funlist, gga
     
 end
 
@@ -357,11 +361,126 @@ function get_rho(VALS, VECTS, nel, nspin, lmax, N, M, ptw, w, bvals, S)
 
 end
 
+function rspace(r, B, arr, rfn, rmax)
+    
+    a = 0.0
+    b = rmax
+    function X(r)
+        return -1.0 + 2 * (a - r)/(a-b)
+    end
+    function R(x)
+	return a .+ (x .- -1.0)*(b-a) / 2.0
+    end
 
-function dft(; fill_str = missing, N = 50, Z = 1.0, Rmax = 20.0, pts=missing , w=missing, bvals=missing, d2=missing, s=missing, niters = 50, mix = 0.5, mixing_mode=:pulay, exc = missing, lmax = missing, conv_thr = 1e-7)
+    f = zeros(typeof(arr[1]), size(r))
+    for c = 1:length(arr)
+        f += B[c].(rfn.(X.(r)))*arr[c]
+    end
+    return f #/ sqrt(b-a) * sqrt(2)
+end
 
-    Z, nel, nspin, lmax, VC, D2, S, VECTS, VALS, funlist, gga = prepare(Z, fill_str, lmax, exc, rmax, N, M, ptw, w, bvals, d2, s)
 
+function rspace(r::Number, B, arr , rfn, rmax)
+
+    a = 0.0
+    b = rmax
+    function X(r)
+        return -1.0 + 2 * (a - r)/(a-b)
+    end
+    function R(x)
+	return a .+ (x .- -1.0)*(b-a) / 2.0
+    end
+
+    f = zero(r)
+    for c = 1:length(arr)
+        f += B[c](rfn(X(r)))*arr[c] #/ (b-a) 
+    end
+    return f #/ sqrt(b-a) * sqrt(2)
+end
+
+
+function jkl(f,bvals, pts, M, N, rmax)
+
+    a=0.0
+    b=rmax
+    function X(r)
+        return -1.0 + 2 * (a - r)/(a-b)
+    end
+    function R(x)
+        return a .+ (x .- -1.0)*(b-a) / 2.0
+    end
+    
+    nr = f.(R.(pts[M, 2:M+2]))
+    
+#    println(size(bvals[M,1:N, 2:M+2]), " " , size(nr))
+    
+    asdf_arr =   bvals[M,1:N,2:M+2]' \ nr
+
+#    println(size(nr), " ", size(bvals[M,1:N,2:M+2]' * asdf_arr))
+
+    return asdf_arr, nr, bvals[M,1:N,2:M+2]' * asdf_arr
+end
+
+function jkl2(f,bvals, pts, M, N, rmax, w)
+
+    a=0.0
+    b=rmax
+    function X(r)
+        return -1.0 + 2 * (a - r)/(a-b)
+    end
+    function R(x)
+        return a .+ (x .- -1.0)*(b-a) / 2.0
+    end
+    
+    nr = f.(R.(pts[M, 2:M+2])) .*w[M,2:M+2]
+
+    asdf_arr = zeros(N)
+    @threads for i = 1:N
+        asdf_arr[i] =   sum( (@view bvals[M,i,2:M+2]).*nr )#.*w[M,2:M+2])
+    end
+
+#    println(size(nr), " ", size(bvals[M,1:N,2:M+2]' * asdf_arr))
+
+    return asdf_arr, nr, bvals[M,1:N,2:M+2]' * asdf_arr
+end
+
+
+function asdf(arr,bvals, pts, w, M)
+
+#    asdf_arr = zeros(length(arr))
+    nr = zeros(typeof(arr[1]), M+1)
+    for n1 = 1:length(arr)
+        nr += arr[n1]*bvals[M,n1,2:M+2]
+    end
+
+    nr = real(nr .* conj(nr))
+    #nr = real(nr)
+    
+    println(size(bvals[M,1:length(arr), 2:M+2]), " " , size(nr))
+    
+    asdf_arr =   bvals[M,1:length(arr),2:M+2]' \ nr
+
+    println(size(nr), " ", size(bvals[M,1:length(arr),2:M+2]' * asdf_arr))
+
+    return asdf_arr
+#    return nr, bvals[M,1:length(arr),2:M+2]' * asdf_arr
+#    println([bvals[M,1:length(arr),2:M+2]' * asdf_arr  nr])
+    
+        #        for n2 = 1:length(arr)
+#            asdf_arr[n2] += sum(nr .* bvals[M,n2,2:M+2].* w[M,2:M+2])
+#        end
+#    end
+#    return asdf_arr
+end
+
+
+function dft(; fill_str = missing, N = 50, M = 300, Z = 1.0, rmax = 20.0, pts=missing , w=missing, bvals=missing, d2=missing, s=missing, niters = 50, mix = 0.5, mixing_mode=:pulay, exc = missing, lmax = missing, conv_thr = 1e-7)
+
+    Z, nel, nspin, lmax, VC, D2, S, invsqrtS, VECTS, VALS, funlist, gga = prepare(Z, fill_str, lmax, exc, rmax, N, M, pts, w, bvals, d2, s)
+
+
+    return VALS, VECTS
+    
     rho, filling = get_rho(VALS, VECTS, nel, nspin, lmax, N, M, ptw, w, bvals)
     
     VALS_1 = deepcopy(VALS)
