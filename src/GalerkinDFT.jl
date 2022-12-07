@@ -9,7 +9,8 @@ using LinearAlgebra
 using ForwardDiff
 using QuadGK
 using FastSphericalHarmonics
-using ..Galerkin:do_integral
+using ..Galerkin:get_gal_rep_matrix
+using ..Galerkin:get_rho_gal
 
 include("Atomlist.jl")
 
@@ -105,12 +106,14 @@ end
 
     
 
-function prepare(Z, fill_str, lmax, exc, rmax, N, M, PTS, W, Bvals, d2, s)
+function prepare(Z, fill_str, lmax, exc, N, M, g)
 
     if typeof(Z) == String || typeof(Z) == Symbol
         Z = atoms[String(Z)]
     end
-    
+
+    a = g.a
+    b = g.b
     
     Z = Float64(Z)
 
@@ -129,25 +132,15 @@ function prepare(Z, fill_str, lmax, exc, rmax, N, M, PTS, W, Bvals, d2, s)
 
     l = 0
 
-    a = 0.0
-    b = rmax
+
     function V(r)
         return -Z / r + 0.5*l*(l+1)/r^2
     end
-    function X(r)
-        return -1.0 + 2 * (a - r)/(a-b)
-    end
-    function R(x)
-        return a .+ (x .- -1.0)*(b-a) / 2.0
-    end
-    function Vx(x)
-        return V(R(x))
-    end
-
+    
     VC = []
     for ll = 0:(lmax+1)
         l = ll
-        Vc = do_integral(Vx, N, PTS, W, Bvals; M = M)
+        Vc = get_gal_rep_matrix(V, g, ; N = N, M = M)
         push!(VC, Vc)
     end
 
@@ -155,10 +148,11 @@ function prepare(Z, fill_str, lmax, exc, rmax, N, M, PTS, W, Bvals, d2, s)
     VALS = zeros(N-1,nspin, lmax+1,2*(lmax)+1 )
 
 
-    D2 =-0.5* d2[1:N-1, 1:N-1] /  (b-a)^2*2^2
-    S = s[1:N-1, 1:N-1]
+    D2 =-0.5* g.d2[1:N-1, 1:N-1] /  (b-a)^2*2^2
+    S = g.s[1:N-1, 1:N-1]
 
     invsqrtS = inv(sqrt(S))
+    invS = inv(S)
     
 #    println("size VECTS ", size(VECTS))
 
@@ -176,7 +170,7 @@ function prepare(Z, fill_str, lmax, exc, rmax, N, M, PTS, W, Bvals, d2, s)
         end
     end
   
-    return Z, nel, nspin, lmax, VC, D2, S, invsqrtS, VECTS, VALS, funlist, gga
+    return Z, nel, nspin, lmax, VC, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga
     
 end
 
@@ -292,9 +286,9 @@ function setup_filling(fill_str; lmax_init=0)
     
     println("lmax $lmax")
     nel = zeros(nspin, lmax+1, (2*lmax+1))
-    println("Filling")
+#    println("Filling")
     for t in T
-        println(t)
+        #        println(t)
         if length(t) == 4
             n,l,m,num_el = t
             n = Int64(n)
@@ -323,32 +317,33 @@ function setup_filling(fill_str; lmax_init=0)
     
 end
 
-function get_rho(VALS, VECTS, nel, nspin, lmax, N, M, ptw, w, bvals, S)
+function get_rho(VALS, VECTS, nel, nspin, lmax, N, M, invS, g)
 
-    rho = zeros(N-1, nspin, lmax+1, 2*(lmax+1))
+    rho = zeros(N-1, nspin, lmax+1, 2*lmax+1)
     filling = zeros(size(VALS))
     
     for spin = 1:nspin
         for l = 0:lmax
             for m = -l:l
                 fillval = 2.0
-                nleft = nel[spin, l+1, m+lmax+1]
+                nleft = nel[spin, l+1, m+l+1]
                 if nleft < 1e-20
-                    nleft = 1e-20
+                    nleft = 0.0
+                    break
                 end
                 
                 for n = 1:N-1
                     if nleft <= fillval/nspin + 1e-10
-                        t = nleft * real( (S*VECTS[n, :, l+1, m+lmax+1]).*conj(VECTS[n, :, l+1, m+lmax+1]))
-                        rho[:,spin, l+1, m+lmax+1] += t
-                        filling[i,spin,d1[1], d1[2]] = nleft
+
+                        rho[:,spin, l+1, m+l+1] += sqrt(nleft) *VECTS[:, n, spin, l+1, m+l+1]
+                        filling[n,spin,l+1, m+l+1] = nleft
                         break
                     else
                         nleft -= fillval / nspin
-                        filling[i,spin,d1[1], d1[2]] = fillval / nspin
+                        filling[n,spin,l+1, m+l+1] = fillval / nspin
 
-                        t = fillval/nspin* real( (S*VECTS[n, :, l+1, m+lmax+1]).*conj(VECTS[n, :, l+1, m+lmax+1]))
-                        rho[:,spin, l+1, m+lmax+1] += t
+                        #t = fillval/nspin* real( (VECTS[:, n, spin, l+1, m+l+1]).*conj(VECTS[:, n, spin, l+1, m+l+1]))
+                        rho[:,spin, l+1, m+l+1] += sqrt(fillval/nspin)*VECTS[:, n, spin, l+1, m+l+1]
                     end
                 end
                     
@@ -356,11 +351,27 @@ function get_rho(VALS, VECTS, nel, nspin, lmax, N, M, ptw, w, bvals, S)
             end
         end
     end
+
+#    println("rho")
+#    println(rho)
     
-    return rho, filling
+    rho_gal = zeros(N-1, nspin, lmax+1, 2*lmax+1)
+    rho_gal_R2 = zeros(N-1, nspin, lmax+1, 2*lmax+1)
+    for spin = 1:nspin
+        for l = 0:lmax
+            for m = -l:l
+                rho_gal[:,spin, l+1, m+l+1], rho_gal_R2[:,spin, l+1, m+l+1] = get_rho_gal(rho[:,spin, l+1,m+l+1], g, M=M, invS=invS)
+            end
+        end
+    end
+                
+
+    
+    return rho_gal / (g.b-g.a) * 2, rho_gal_R2/ (g.b-g.a) * 2, filling
 
 end
 
+#=
 function rspace(r, B, arr, rfn, rmax)
     
     a = 0.0
@@ -435,7 +446,7 @@ function jkl2(f,bvals, pts, M, N, rmax, w)
     nr = f.(R.(pts[M, 2:M+2])) .*w[M,2:M+2]
 
     asdf_arr = zeros(N)
-    @threads for i = 1:N
+    for i = 1:N
         asdf_arr[i] =   sum( (@view bvals[M,i,2:M+2]).*nr )#.*w[M,2:M+2])
     end
 
@@ -443,45 +454,71 @@ function jkl2(f,bvals, pts, M, N, rmax, w)
 
     return asdf_arr, nr, bvals[M,1:N,2:M+2]' * asdf_arr
 end
+=#
 
 
-function asdf(arr,bvals, pts, w, M)
 
-#    asdf_arr = zeros(length(arr))
+
+#=
+function get_rho_gal(arr,bvals, pts, w, M, invS)
+
+    N = length(arr)
     nr = zeros(typeof(arr[1]), M+1)
-    for n1 = 1:length(arr)
+    for n1 = 1:N
         nr += arr[n1]*bvals[M,n1,2:M+2]
     end
-
-    nr = real(nr .* conj(nr))
-    #nr = real(nr)
+    #nr = nr.*w[M,2:M+2]
+    nrR = real(nr .* conj(nr)) #.*w[M,2:M+2]
     
-    println(size(bvals[M,1:length(arr), 2:M+2]), " " , size(nr))
+    #rho_gal =   bvals[M,1:length(arr),2:M+2]' \ nrR
     
-    asdf_arr =   bvals[M,1:length(arr),2:M+2]' \ nr
+    rho_gal = zeros(typeof(arr[1]), N)
+    for i = 1:N
+        rho_gal[i] =   sum( (bvals[M,i,2:M+2]).*nrR.*w[M,2:M+2] )
+    end
 
-    println(size(nr), " ", size(bvals[M,1:length(arr),2:M+2]' * asdf_arr))
+    return invS*rho_gal
 
-    return asdf_arr
-#    return nr, bvals[M,1:length(arr),2:M+2]' * asdf_arr
-#    println([bvals[M,1:length(arr),2:M+2]' * asdf_arr  nr])
-    
-        #        for n2 = 1:length(arr)
-#            asdf_arr[n2] += sum(nr .* bvals[M,n2,2:M+2].* w[M,2:M+2])
-#        end
-#    end
-#    return asdf_arr
+end
+=#
+
+function vhart(rhor2, D2)
+
+    vh = D2 \ rhor2
+
+    return vh
 end
 
+function display_eigs(VALS, nspin,lmax)
+    println()
+    for spin = 1:nspin
+        for l = 0:lmax
+            for m = -l:l
+                if m < 0
+                    println("vals spin =  $spin l = $l m = $m   ", VALS[1:min(6, size(VALS)[1]), spin, l+1,m+l+1])
+                else
+                    println("vals spin =  $spin l = $l m =  $m   ", VALS[1:min(6, size(VALS)[1]), spin, l+1,m+l+1])
 
-function dft(; fill_str = missing, N = 50, M = 300, Z = 1.0, rmax = 20.0, pts=missing , w=missing, bvals=missing, d2=missing, s=missing, niters = 50, mix = 0.5, mixing_mode=:pulay, exc = missing, lmax = missing, conv_thr = 1e-7)
+                end
+            end
+        end
+    end
 
-    Z, nel, nspin, lmax, VC, D2, S, invsqrtS, VECTS, VALS, funlist, gga = prepare(Z, fill_str, lmax, exc, rmax, N, M, pts, w, bvals, d2, s)
+end
 
+function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters = 50, mix = 0.5, mixing_mode=:pulay, exc = missing, lmax = missing, conv_thr = 1e-7)
 
-    return VALS, VECTS
-    
-    rho, filling = get_rho(VALS, VECTS, nel, nspin, lmax, N, M, ptw, w, bvals)
+    if M == -1
+        M = g.M
+    end
+    if N == -1
+        N = g.N
+    end
+
+    Z, nel, nspin, lmax, VC, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga = prepare(Z, fill_str, lmax, exc, N, M, g)
+
+    rho, rhor2, filling = get_rho(VALS, VECTS, nel, nspin, lmax, N, M, invS, g)
+
     
     VALS_1 = deepcopy(VALS)
 
@@ -491,23 +528,31 @@ function dft(; fill_str = missing, N = 50, M = 300, Z = 1.0, rmax = 20.0, pts=mi
         
         for spin = 1:nspin 
             for l = 0:(lmax)
-                vals, vects = eigen(D2 + VC[ll+1], S)
+                vals, vects = eigen(D2 + VC[l+1], S)
 
-                VECTS[:,:,spin, ll+1, 1] = vects
-                VALS[:,spin, ll+1, m] = vals
+                VECTS[:,:,spin, l+1, 1] = vects
+                VALS[:,spin, l+1, 1] = vals
 
-                rho, filling = get_rho(VALS, VECTS, nel, nspin, lmax, N, M, ptw, w, bvals)
+                rho, rhor2, filling = get_rho(VALS, VECTS, nel, nspin, lmax, N, M, invS, g)
+
                 
             end
         end
 
-        if maximum(abs(nel*(VALS - VALS_1))) < conv_thr
+        if maximum(abs.(filling.*(VALS - VALS_1))) < conv_thr
             break
         end
         
     end
 
+    vh = vhart(rhor2[:,1,1,1], D2)
+    
+    display_eigs(VALS, nspin, lmax)
+    
+    return VALS, VECTS, rho, filling, vh
 
-    end #end dft
+    
+end #end dft
+
 
 end #end module
