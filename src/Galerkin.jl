@@ -38,7 +38,7 @@ function makegal(N,a,b; α=0.0, M = -1)
     b = Float64(b)
     
     if M == -1
-        M = Int64(round(N*2.1))
+        M = Int64(round(N*2.5))
     end
 
     r, invr = get_r(α)
@@ -130,12 +130,15 @@ function get_rho_gal(arr,g::gal; M=-1, invS=missing)
     
     nr = zeros(typeof(arr[1]), M+1)
     for n1 = 1:N
-        nr += arr[n1]*g.bvals[M,n1,2:M+2]
+        nr += real(conj(arr[n1])*arr[n1]) *g.bvals[M,n1,2:M+2].^2
     end
 
-    nrR = real(nr .* conj(nr)) .* g.w[M,2:M+2]
+    rho_realspace_M = nr #real(nr .* conj(nr))
+    nrR = rho_realspace_M .* g.w[M,2:M+2]
 
-    nrR_R2 = real(nr .* conj(nr)) .* g.w[M,2:M+2] ./ g.R.(g.pts[M, 2:M+2]).^3
+    nrR_R2 = rho_realspace_M .* g.w[M,2:M+2] ./ g.R.(g.pts[M, 2:M+2]).^1
+
+    rho_realspace_M = rho_realspace_M ./ g.R.(g.pts[M, 2:M+2]).^2
     
     rho_gal = zeros(Float64, N)
     rho_gal_R2 = zeros(Float64, N)
@@ -144,7 +147,7 @@ function get_rho_gal(arr,g::gal; M=-1, invS=missing)
         rho_gal_R2[i] =   sum( (g.bvals[M,i,2:M+2]).*nrR_R2 )
     end
 
-    return invS*rho_gal,  invS*rho_gal_R2
+    return invS*rho_gal ,   rho_gal_R2, rho_realspace_M
 
 end
 
@@ -161,6 +164,13 @@ function gal_rep_to_rspace(r, rep, g::gal)
 end
 
 function gal_rep_to_rspace(r::Number, rep, g::gal)
+
+    if r > g.b
+        return 0.0
+    elseif r < g.a
+        return 0.0
+    end
+    
     N = length(rep)
     f = zeros(typeof(rep[1]), size(r))
 
@@ -173,6 +183,27 @@ function gal_rep_to_rspace(r::Number, rep, g::gal)
     return f
 end
 
+function get_gal_rep_matrix_R(fn_R, g::gal; N = -1)
+
+    if N == -1
+        N = g.N
+    end
+
+    M = length(fn_R)-1
+    
+    INT = zeros(N-1, N-1)
+    f = fn_R .* (@view g.w[M, 2:M+2])
+    @threads for n1 = 1:(N-1)
+        for n2 = 1:(N-1)
+            INT[n1, n2] = sum(  (@view g.bvals[M, n1, 2:M+2]).*(@view g.bvals[M, n2,2:M+2]) .* f)
+        end
+    end
+    
+    return (INT+INT')/2.0
+
+end
+
+
 function get_gal_rep_matrix(fn, g::gal; M = -1, N = -1)
 
     if M == -1
@@ -184,6 +215,63 @@ function get_gal_rep_matrix(fn, g::gal; M = -1, N = -1)
     
     INT = zeros(N-1, N-1)
     f = fn.( g.R.(@view g.pts[M, 2:M+2])) .* (@view g.w[M, 2:M+2])
+    @threads for n1 = 1:(N-1)
+        for n2 = 1:(N-1)
+            INT[n1, n2] = sum(  (@view g.bvals[M, n1, 2:M+2]).*(@view g.bvals[M, n2,2:M+2]) .* f)
+        end
+    end
+    
+    return (INT+INT')/2.0
+
+end
+
+function get_gal_rep_matrix(arr::Vector, g::gal; M = -1)
+
+    if M == -1
+        M = g.M
+    end
+    N = length(arr)+1
+    println("N $N")
+    INT = zeros(N-1, N-1)
+
+
+    arr_m = zeros(M+1)
+    for n1 = 1:N-1
+        arr_m += g.bvals[M, n1, 2:M+2] * arr[n1]
+    end
+
+    arr_m = arr_m .* (@view g.w[M, 2:M+2])
+    
+    @threads for n1 = 1:(N-1)
+        for n2 = 1:(N-1)
+            INT[n1, n2] = sum(  (@view g.bvals[M, n1, 2:M+2]).*(@view g.bvals[M, n2,2:M+2]) .* arr_m)
+        end
+    end
+    
+    return (INT+INT')/2.0
+    
+    
+end
+
+
+function get_vh_mat(vh_tilde, g::gal, nel; M = -1)
+
+    if M == -1
+        M = g.M
+    end
+
+    N = length(vh_tilde)+1
+               
+    INT = zeros(N-1, N-1)
+
+    vh_tilde_vec = zeros(M+1)
+
+    for n1 = 1:N-1
+        vh_tilde_vec += g.bvals[M, n1, 2:M+2] * vh_tilde[n1]
+    end
+        
+    f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[M, 2:M+2]))  .+ nel/g.b * sqrt(pi)/(2*pi))  .* (@view g.w[M, 2:M+2])
+    
     @threads for n1 = 1:(N-1)
         for n2 = 1:(N-1)
             INT[n1, n2] = sum(  (@view g.bvals[M, n1, 2:M+2]).*(@view g.bvals[M, n2,2:M+2]) .* f)

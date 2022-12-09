@@ -1303,7 +1303,8 @@ function prepare_dft(Z, N, Rmax, ax, bx, fill_str, spherical, vext, lmax_rho, lm
         lmax_rho = 0
     end
 
-    
+
+    #=
     begin
         function grid(x)
             return log(bx*x + ax)
@@ -1324,8 +1325,8 @@ function prepare_dft(Z, N, Rmax, ax, bx, fill_str, spherical, vext, lmax_rho, lm
             return grid1(x).^-1
         end
     end
-
-#=    begin
+=#
+    begin
 
         println("linear grid")
         function grid(x)
@@ -1347,7 +1348,7 @@ function prepare_dft(Z, N, Rmax, ax, bx, fill_str, spherical, vext, lmax_rho, lm
             return 1.0
         end
     end
-=#    
+    
     
 #    println("fakegrid")
     
@@ -1571,6 +1572,9 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
             vlda_LM, elda_LM = VXC_LM(rho_LM *4*pi, 4*pi*drho_LM, rall_rs, funlist=funlist, D1Xgrid, gga=gga)
         end
 
+#        println("vlda get ", vlda_LM[1:3])
+
+        
 #        println("spin_lm_rho")
 #        println(spin_lm_rho)
         
@@ -1613,10 +1617,11 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
         
         Vtot .= 0.0
 
-
+        
         if hydrogen == false
-            Vtot[:,1,:,:] .= (4*pi*VH_LM[:,:,:]  + vlda_LM[:,1,:,:])
+            Vtot[:,1,:,:] .= (4*pi*VH_LM[:,:,:]  + vlda_LM[:,1,:,:] ) 
         end
+        
         
         Vtot[2:N,1, 1,1] += diag(Vc) * sqrt(4*pi)
         if !ismissing(vext)
@@ -1783,7 +1788,9 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
 
     #    return energy,converged, vals_r, vects, rho_LM, rall_rs, wall.*ig1, rhor2, vlda_LM, drho_LM, D1Xgrid, va, rhoR, rhoR2
 
-    return energy,converged, vals_r, vects, rho_LM, rall_rs, wall.*ig1, rhoR2, VH_LM, rho_fn, rho_fn2, grid, Ham
+    println("vlda end ", vlda_LM[1:3])
+    
+    return energy,converged, vals_r, vects, rho_LM, rall_rs, wall.*ig1, rhoR2, VH_LM,  vlda_LM, rho_fn, rho_fn2, grid, Ham
     
 end    
 
@@ -1819,7 +1826,7 @@ function solve_small(spin_lm, VH_LM, vlda_LM, H0_L, vals_r, vects, lmax_rho, N, 
         if hydrogen
             Ham = H0_L[l+1] #+ (VH_mat + VLDA_mat)
         else
-            Ham = H0_L[l+1] + (VH_mat + VLDA_mat)
+            Ham = H0_L[l+1] + (VH_mat + VLDA_mat) 
         end                
 
 
@@ -2188,6 +2195,8 @@ function VXC_LM(rho_LM, drho_LM, r, D1; get_elm=false, funlist=missing, gga=fals
                     end
                 else
                     vlda[:,1,l, m] = v_LDA.(@view rho[:,1,l,m])
+#                    println("v_LDA rho ", rho[1:3,1,l,m], " v " , vlda[1:3,1,l, m], " r ", r[1:3])
+
                     if get_elm
                         elda[:,l,m] = e_LDA.(@view rho[:,1,l,m])
                     end
@@ -2239,6 +2248,7 @@ function VXC_LM(rho_LM, drho_LM, r, D1; get_elm=false, funlist=missing, gga=fals
         end
     end
 
+#    println("vlda after transform ", vlda_lm[1:3,1,1,1])
     
 #    vlda_lm2 = zeros(size(vlda))
     #vlda_lm2 = copy(vlda_lm)
