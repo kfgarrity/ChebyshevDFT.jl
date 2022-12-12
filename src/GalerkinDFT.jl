@@ -388,16 +388,21 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, N, M, invS, g, D2)
     end
     
     rho_gal_R2 = rho_gal_R2 / (g.b-g.a) * 2
-
+    rho_gal_dR = rho_gal_dR/ (g.b-g.a) * 2
+    rho_rs_M = rho_rs_M / (g.b-g.a) * 2
+    
     if false
     begin
         n0 = xxx->ForwardDiff.derivative(xx-> ForwardDiff.derivative(x->gal_rep_to_rspace(x, rho_gal_R2[:,1,1,1], g), xx), xxx)
-        n00 = (n0(0.0)/2.0/ (g.b-g.a) * 2)
+        n00 = (n0(0.0)/2.0 )
 #        println("n0 $(n00)")
     end
     end
+
+    x = 1.0
+    #println("test gal_rep_to_rspace ", gal_rep_to_rspace(x, rho_gal_R2[:,1], g), " " , gal_rep_to_rspace(x, rho_gal_dR[:,1], g) * x)
     
-    return rho_gal_R2, rho_gal_dR/ (g.b-g.a) * 2, rho_rs_M / (g.b-g.a) * 2
+    return rho_gal_R2, rho_gal_dR, rho_rs_M 
 
 end
 
@@ -583,7 +588,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     @time Z, nel, filling, nspin, lmax, VC, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga = prepare(Z, fill_str, lmax, exc, N, M, g)
 
 
-#    println("vChebyshevDFT.Galerkin.do_1d_integral(VECTS[:,1,1,1], g) ", do_1d_integral(real.(VECTS[:,1,1,1,1]).^2, g))
+    #println("vChebyshevDFT.Galerkin.do_1d_integral(VECTS[:,1,1,1], g) ", do_1d_integral(real.(VECTS[:,1,1,1,1]).^2, g))
     
     println("get rho")
     @time rho_R2, rho_dR, rho_rs_M = get_rho(VALS, VECTS, nel, filling, nspin, lmax, N, M, invS, g, D2)
@@ -608,10 +613,11 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
                 V = deepcopy(VC[l+1])
                 if funlist != :hydrogen
 
-                    vh_mat, vh_f = vhart(rho_dR[:,1,1,1], D2, sum(nel), g, M)
-                    vlda_mat, vlda = vxc(rho_rs_M[:,1,1,1], g, M, N, funlist, gga, nspin)
+                    vh_mat, vh_f = vhart(rho_dR[:,1], D2, sum(nel), g, M)
+#                    return vh_f
+                    vlda_mat, vlda = vxc(rho_rs_M[:,1], g, M, N, funlist, gga, nspin)
 
-                    V += (4*pi*vh_mat/sqrt(4*pi) + vlda_mat/2 /sqrt(pi))
+                    V += (4*pi*vh_mat/sqrt(4*pi)   + vlda_mat/2 /sqrt(pi))
                     
                 end
                 
@@ -629,14 +635,14 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
 
 #        display_eigs(VALS, nspin, lmax)
         
-        rho_R2_new, rhor_dR_new, rho_rs_M_new  = get_rho(VALS, VECTS, nel, filling, nspin, lmax, N, M, invS, g, D2)
+        rho_R2_new, rho_dR_new, rho_rs_M_new  = get_rho(VALS, VECTS, nel, filling, nspin, lmax, N, M, invS, g, D2)
 
         #println("ChebyshevDFT.Galerkin.do_1d_integral(rho[:,1,1,1], g) ", do_1d_integral(rho_R2[:,1,1,1], g))
 
 
         
         rho_R2 = rho_R2_new * mix + rho_R2 *(1-mix)
-        rho_dR = rho_dR * mix + rho_dR * (1-mix)
+        rho_dR = rho_dR_new * mix + rho_dR * (1-mix)
         rho_rs_M = rho_rs_M_new * mix + rho_rs_M * (1-mix)
 
         eigval_diff = maximum(abs.(filling.*(VALS - VALS_1)))
@@ -653,7 +659,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     println()
 
     println("size rho_rs_M", size(rho_rs_M))
-    return VALS, VECTS, rho_R2, rho_dR, rho_rs_M, filling, nel
+    return VALS, VECTS, rho_R2
 
     
 end #end dft

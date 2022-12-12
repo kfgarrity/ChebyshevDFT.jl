@@ -1,7 +1,8 @@
 
 module AngularIntegration
-
+using SphericalHarmonics
 using Lebedev
+using Base.Threads
 
 
 struct leb
@@ -25,6 +26,8 @@ Base.show(io::IO, l::leb) = begin
     println("n=$(l.n) N=$(l.N)")
 end
 
+real_gaunt_dict = Dict{NTuple{6,Int64}, Float64}()
+
 
 function makeleb(n)
     
@@ -47,43 +50,16 @@ end
 
 function integrate(f, l::leb)
 
-    return sum(f.(l.θ, l.ϕ) .*l.w)
+    return 4*pi*sum(f.(l.θ, l.ϕ) .*l.w)
 
 end
 
 
-function integrate(f, n)
+function integrate(f, n::Integer)
 
-    
-    for nn = n:n+11
-        if Lebedev.isavailable(nn)
-            n = nn
-            break
-        end
-    end
+    l = makeleb(n)
 
-    x,y,z,w = Lebedev.lebedev_by_order(n)
-
-    println("x ", x)
-    println("y ", y)
-    println("z ", z)
-
-    
-    N = length(x)
-    println("order $n , length $N")
-
-    θ, ϕ = get_tp(x,y,z)
-
-    println("θ ", θ)
-    println("ϕ ", ϕ)
-
-    ftp = f.(θ, ϕ)
-
-    println("ftp ", ftp)
-
-
-    
-    return sum(ftp.*w)
+    return integrate(f, l)
     
 end
 
@@ -130,6 +106,51 @@ function get_tp(x,y,z)
     return θ, ϕ
 
 end
+
+function fill_gaunt(;lmax=4, lmax_rho=12, n=23)
+
+    l = makeleb(n)
+
+
     
+    function y(t,p)
+        return SphericalHarmonics.computeYlm(t, p, lmax=lmax_rho, SHType = SphericalHarmonics.RealHarmonics())
+    end
+
+    data = y.(l.θ, l.ϕ)
+
+    data_reshape = Dict{NTuple{2,Int64}, Vector{Float64}}()
+
+    for l1 = 0:lmax_rho
+        for m1 = -l1:l1
+            data_reshape[(l1,m1)] = zeros(l.N)
+            for n = 1:l.N
+                data_reshape[(l1,m1)][n] = data[n][(l1,m1)]
+            end                
+        end
+    end
+            
+    
+    
+#    return data_reshape
+    for l1 = 0:lmax_rho
+        for m1 = -l1:l1
+            for l2 = 0:lmax
+                for m2 = -l2:l2
+                    for l3 = 0:lmax
+                        for m3 = -l3:l3
+                            @inbounds real_gaunt_dict[(l1,m1,l2,m2,l3,m3)] = sum(data_reshape[(l1,m1)].*data_reshape[(l2,m2)].*data_reshape[(l3,m3)].*l.w)*4*pi
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    #    return real_gaunt_dict
+
+end
+
+
 
 end #end module

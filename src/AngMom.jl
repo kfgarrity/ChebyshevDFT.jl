@@ -103,8 +103,6 @@ end
 
 
 
-
-
 function fill_dict(; lmax=6)
 
     T = []
