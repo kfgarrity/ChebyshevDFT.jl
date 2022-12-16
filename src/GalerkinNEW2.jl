@@ -125,7 +125,7 @@ function get_gal_rep(arr::Array{1}, g::gal; M=-1, invS=missing)
 
 end
 
-function get_rho_gal(rho_rs_M_R2,g::gal; N=-1, invS=missing)
+function get_rho_gal(rho_rs_M_R2,g::gal; N=-1, invS=missing, l = 0)
 
     if N == -1
         N = g.N
@@ -137,19 +137,25 @@ function get_rho_gal(rho_rs_M_R2,g::gal; N=-1, invS=missing)
     M = length(rho_rs_M_R2)-1
     
     nrR = rho_rs_M_R2 .* g.w[2:M+2,M]
-    nrR_dR = rho_rs_M_R2 .* g.w[2:M+2,M] ./ g.R.(g.pts[2:M+2,M]).^1
+    nrR_dR = rho_rs_M_R2 .* g.w[2:M+2,M] ./ g.R.(g.pts[2:M+2,M])
 
     rho_rs_M = rho_rs_M_R2 ./ g.R.(g.pts[2:M+2,M]).^2
 
     rho_gal = zeros(Float64, N-1)
     rho_gal_dR = zeros(Float64, N-1)
+    rho_gal_multipole = zeros(Float64, N-1)
+
+    nrR_mp = rho_rs_M_R2 .* g.w[2:M+2,M] .* g.R.(g.pts[2:M+2,M]).^l
+    
     for i = 1:N-1
         rho_gal[i] =   sum( (g.bvals[2:M+2,i,M]).*nrR )
         rho_gal_dR[i] =   sum( (g.bvals[2:M+2,i,M]).*nrR_dR )
+        rho_gal_multipole[i] =   sum( (g.bvals[2:M+2,i,M]).*nrR_mp )
     end
 
+    
 #    println("size invS ", size(invS), " rho_gal ", size(rho_gal), " ", size(rho_gal_dR))
-    return invS*rho_gal ,  rho_gal_dR, rho_rs_M
+    return invS*rho_gal ,  rho_gal_dR, rho_rs_M, invS*rho_gal_multipole
     
 end
 

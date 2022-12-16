@@ -30,6 +30,7 @@ using ..LDA:e_LDA
 using ..LDA:v_LDA_sp
 using ..LDA:e_LDA_sp
 
+using ..AngularIntegration:real_gaunt_dict
 
 function choose_exc(exc, nspin)
 
@@ -137,20 +138,29 @@ function prepare(Z, fill_str, lmax, exc, N, M, g)
     println("choose exc")
     @time funlist, gga = choose_exc(exc, nspin)
 
-    l = 0
 
 
-    function V(r)
-        return -Z / r + 0.5*l*(l+1)/r^2
+    function V_c(r)
+        return -Z / r 
     end
-    
+
+    V_C = get_gal_rep_matrix(V_c, g, ; N = N, M = M)
+
+
+
+    function V_ang(r)
+        return 0.5*1.0/r^2
+    end
     println("get gal rep matrix ")
-    VC = []
-    @time for ll = 0:(lmax+1)
-        l = ll
-        Vc = get_gal_rep_matrix(V, g, ; N = N, M = M)
-        push!(VC, Vc)
-    end
+
+    V_L = get_gal_rep_matrix(V_ang, g, ; N = N, M = M)
+
+    #    V_l = []
+#    @time for ll = 0:(lmax+1)
+#        l = ll
+#        vl = get_gal_rep_matrix(V_ang, g, ; N = N, M = M)
+#        push!(V_l, vl)
+#    end
 
     VECTS = zeros(Complex{Float64}, N-1,N-1, nspin, lmax+1,2*lmax+1 )
     VALS = zeros(N-1,nspin, lmax+1,2*lmax+1 )
@@ -166,7 +176,7 @@ function prepare(Z, fill_str, lmax, exc, N, M, g)
 
     println("initial eig")
     @time for ll = 0:lmax
-        vals, vects = eigen(D2 + VC[ll+1], S)
+        vals, vects = eigen(D2 + V_C + ll*(ll+1)*V_L, S)
         #vals, vects = eigen( invsqrtS*(D2 + VC[ll+1])*invsqrtS)
         
 #        println("vals $ll $(vals[1:3])")
@@ -179,7 +189,7 @@ function prepare(Z, fill_str, lmax, exc, N, M, g)
         end
     end
   
-    return Z, nel, filling, nspin, lmax, VC, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga
+    return Z, nel, filling, nspin, lmax, V_C, V_L, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga
     
 end
 
@@ -308,6 +318,7 @@ function setup_filling(fill_str, N; lmax_init=0)
 
             if nspin == 1
                 nel[1,d[1],d[2]] += num_el
+                println("add nel ", [1,d[1],d[2]], num_el)
             else
                 nel[1,d[1],d[2]] += num_el/2.0
                 nel[2,d[1],d[2]] += num_el/2.0
@@ -325,25 +336,33 @@ function setup_filling(fill_str, N; lmax_init=0)
 
 
     #####
-
+    println("nel")
+    println(nel)
     filling = zeros(N-1, nspin, lmax+1, 2*lmax+1)
-    
+
+    println("FILLING----")
+    println("n l m s fill")
     for spin = 1:nspin
         for l = 0:lmax
-            for m = -l:l
+            for m = (-l):l
+
+#                println("L M $l $m")
+
                 fillval = 2.0
                 nleft = nel[spin, l+1, m+l+1]
+#                println("nleft $l $m $spin $nleft")
                 if nleft < 1e-20
                     nleft = 0.0
-                    break
                 end
                 for n = 1:N-1
                     if nleft <= fillval/nspin + 1e-10
-                        filling[n,spin,l+1, m+l+1] = nleft
+                        filling[n,spin,l+1, m+l+1] = nleft/nspin
+                        println("$n  $l  $m  $spin ", nleft)
                         break
                     else
                         nleft -= fillval / nspin
                         filling[n,spin,l+1, m+l+1] = fillval / nspin
+                        println("$n  $l  $m  $spin ", fillval / nspin)                        
                     end
                 end
                     
@@ -351,16 +370,17 @@ function setup_filling(fill_str, N; lmax_init=0)
             end
         end
     end
-    
+    println("---")
     
     return nel, nspin, lmax, filling
     
 end
 
-function get_rho(VALS, VECTS, nel, filling, nspin, lmax, N, M, invS, g, D2)
+function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2)
     println("get rho")
-    rho = zeros(N-1, nspin, lmax+1, 2*lmax+1)
+    #rho = zeros(N-1, nspin, lmax+1, 2*lmax+1)
     rho_rs_M_R2 = zeros(M+1, nspin)
+    rho_rs_M_R2_LM2 = zeros(M+1, nspin, lmax+1, 2*lmax+1)
     @time for spin = 1:nspin
         for l = 0:lmax
             for m = -l:l
@@ -371,25 +391,111 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, N, M, invS, g, D2)
                     end
                     t = gal_rep_to_rspace(VECTS[:, n, spin, l+1,l+1+m], g, M=M)
                     rho_rs_M_R2[:,spin] += real(t.*conj(t)) * fillval
+                    rho_rs_M_R2_LM2[:,spin, l+1, m+1+l] += real(t.*conj(t)) * fillval
+
                 end
             end
         end
     end
 
+    println("z ", rho_rs_M_R2[1,1], " " , rho_rs_M_R2_LM2[1,1, 1, 1] )
+    
     rho_gal_R2 = zeros(N-1, nspin)
     rho_gal_dR = zeros(N-1, nspin)
     rho_rs_M = zeros(M+1, nspin)
+
+    lmaxrho = min(lmaxrho, lmax * 2)
+    rho_rs_M_R2_LM = zeros(M+1, nspin, lmaxrho+1, 2*lmaxrho+1)
+
+    rho_rs_M_LM = zeros(M+1, nspin, lmaxrho+1, lmaxrho*2+1)
+    rho_gal_R2_LM = zeros(N-1, nspin, lmaxrho+1, lmaxrho*2+1)
+    rho_gal_dR_LM = zeros(N-1, nspin, lmaxrho+1, lmaxrho*2+1)
+
+    rho_gal_mulipole_LM = zeros(N-1, nspin, lmaxrho+1, lmaxrho*2+1)
+    
+    for lr = 0:lmaxrho
+        for mr = -lr:lr
+            for l = 0:lmax
+                for m = -l:l
+                    gcoef = real_gaunt_dict[(lr,mr,l,m,l,m)]
+                    for spin = 1:nspin
+                        rho_rs_M_R2_LM[:,spin, lr+1,mr+lr+1] += gcoef * rho_rs_M_R2_LM2[:,spin, l+1, m+1+l]
+                    end
+                end
+            end
+        end
+    end
+
+    rho_rs_M_R2_LM = rho_rs_M_R2_LM * sqrt(4 * pi)
+    
+    println("zz ", rho_rs_M_R2_LM[1,1,1,1])
     
     @time for spin = 1:nspin
-        a,b,c = get_rho_gal(rho_rs_M_R2[:,spin], g,N=N, invS=invS)
+#        println("before1")
+        a,b,c,d = get_rho_gal(rho_rs_M_R2[:,spin], g,N=N, invS=invS)
+#        println("length ret ", length(ret))
         rho_gal_R2[:,spin] += a
         rho_gal_dR[:,spin] += b
         rho_rs_M[:,spin]  += c
     end
+
+
+    for spin = 1:nspin
+        for lr = 0:lmaxrho
+            for mr = -lr:lr
+#                for l = 0:lmax
+#                    for m = -l:l
+#                        println("before")
+#                        println("size(rho_rs_M_R2_LM[:,spin, lr+1, mr+lr+1] ", size(rho_rs_M_R2_LM[:,spin, lr+1, mr+lr+1]))
+                a,b,c,d =  get_rho_gal(rho_rs_M_R2_LM[:,spin, lr+1, mr+lr+1], g,N=N, invS=invS, l = lr)
+#                        println("size ret ", size(ret))
+                rho_gal_R2_LM[:,spin, lr+1, mr+lr+1] += a
+                rho_gal_dR_LM[:,spin, lr+1, mr+lr+1 ] += b
+                rho_rs_M_LM[:,spin, lr+1, mr+lr+1]  += c
+                rho_gal_mulipole_LM[:,spin, lr+1, mr+lr+1]  += d
+#                    end
+#                end
+            end
+        end
+    end                    
+
     
     rho_gal_R2 = rho_gal_R2 / (g.b-g.a) * 2
     rho_gal_dR = rho_gal_dR/ (g.b-g.a) * 2
     rho_rs_M = rho_rs_M / (g.b-g.a) * 2
+
+    rho_gal_R2_LM = rho_gal_R2_LM / (g.b-g.a) * 2
+    rho_gal_dR_LM = rho_gal_dR_LM / (g.b-g.a) * 2
+    rho_rs_M_LM = rho_rs_M_LM  / (g.b-g.a) * 2
+    rho_gal_mulipole_LM = rho_gal_mulipole_LM  / (g.b-g.a) * 2
+    
+
+    println("SIZE ", size(rho_gal_R2_LM), " " , size(rho_gal_mulipole_LM), " lmax rho ", lmaxrho)
+    
+    println("a ", rho_gal_R2[1]," ", rho_gal_R2_LM[1])
+    println("b ", rho_gal_dR[1]," ", rho_gal_dR_LM[1])
+    println("c ", rho_rs_M[1]," ", rho_rs_M_LM[1])
+    println("d ", rho_gal_R2[1]," ", rho_gal_mulipole_LM[1])
+
+    
+    println("ChebyshevDFT.Galerkin.do_1d_integral(rho_gal, g) ", do_1d_integral(rho_gal_R2[:,1], g))
+
+    MP = zeros(lmaxrho+1, 2+lmaxrho+1)
+    
+    for spin = 1:nspin
+        for l = 0:lmaxrho
+            for m = -l:l
+                MP[l+1, l+m+1] += do_1d_integral(rho_gal_mulipole_LM[:,1,l+1,l+m+1], g)
+            end
+        end
+    end
+                #                println("l m $l $m")
+#                println("ChebyshevDFT.Galerkin.do_1d_integral(rho_gal, g) ", do_1d_integral(rho_gal_R2_LM[:,1,l+1,l+m+1], g))
+#                println("ChebyshevDFT.Galerkin.do_1d_integral(rho_muli, g) ", do_1d_integral(rho_gal_mulipole_LM[:,1,l+1,l+m+1], g))
+#            end
+#        end
+#    end
+    
     
     if false
     begin
@@ -402,7 +508,7 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, N, M, invS, g, D2)
     x = 1.0
     #println("test gal_rep_to_rspace ", gal_rep_to_rspace(x, rho_gal_R2[:,1], g), " " , gal_rep_to_rspace(x, rho_gal_dR[:,1], g) * x)
     
-    return rho_gal_R2, rho_gal_dR, rho_rs_M 
+    return rho_gal_R2_LM, rho_gal_dR_LM, rho_rs_M_LM, MP
 
 end
 
@@ -517,9 +623,9 @@ function get_rho_gal(arr,bvals, pts, w, M, invS)
 end
 =#
 
-function vhart(rhor2, D2, nel, g, M)
+function vhart(rhor2, D2, V_L, g, M, l, m, MP)
 
-    vh_tilde = D2 \ rhor2
+    vh_tilde = (D2 + l*(l+1)*V_L) \ rhor2
 
     vh_tilde = vh_tilde /(4*pi)*sqrt(pi)
     
@@ -530,7 +636,7 @@ function vhart(rhor2, D2, nel, g, M)
         if r < 1e-7
             r = 1e-7
         end
-        return gal_rep_to_rspace(r, vh_tilde, g) / r  .+ nel/g.b * sqrt(pi)/(2*pi)
+        return gal_rep_to_rspace(r, vh_tilde, g) / r  .+ MP[l+1, l+m+1]/g.b^(l+1) * sqrt(pi)/(2*pi) / (2*l+1)
     end
     
     return vh_mat, vh_f
@@ -575,7 +681,7 @@ function display_eigs(VALS, nspin,lmax)
 
 end
 
-function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters = 50, mix = 0.5, mixing_mode=:pulay, exc = missing, lmax = missing, conv_thr = 1e-7)
+function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters = 50, mix = 0.5, mixing_mode=:pulay, exc = missing, lmax = missing, conv_thr = 1e-7, lmaxrho = 0)
 
     if M == -1
         M = g.M
@@ -585,13 +691,13 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     end
 
     println("prepare")
-    @time Z, nel, filling, nspin, lmax, VC, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga = prepare(Z, fill_str, lmax, exc, N, M, g)
+    @time Z, nel, filling, nspin, lmax, V_C, V_L,  D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga = prepare(Z, fill_str, lmax, exc, N, M, g)
 
 
     #println("vChebyshevDFT.Galerkin.do_1d_integral(VECTS[:,1,1,1], g) ", do_1d_integral(real.(VECTS[:,1,1,1,1]).^2, g))
     
     println("get rho")
-    @time rho_R2, rho_dR, rho_rs_M = get_rho(VALS, VECTS, nel, filling, nspin, lmax, N, M, invS, g, D2)
+    @time rho_R2, rho_dR, rho_rs_M, MP = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2)
     println("done rho")
 
     @time println("ChebyshevDFT.Galerkin.do_1d_integral(rho[:,1,1,1], g) ", do_1d_integral(rho_R2[:,1,1,1], g))
@@ -606,25 +712,35 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     @time for iter = 1:niters
 
         VALS_1[:,:,:,:] = VALS
+
+
+        VH_LM, vh_f_LM = vhart_LM( sum(rho_dR, dims=2), D2, g, M, l, m, MP, V_L)
+        VXC_LM, vlda_LM = vxc_LM( rho_rs_M, g, M, N, funlist, gga, nspin)
+
+        VALS, VECTS = solve_small(V_C, V_L, VH_LM, VXC_LM, D2, S)
+
         
+        #=
         for spin = 1:nspin 
             for l = 0:(lmax)
 
-                V = deepcopy(VC[l+1])
-                if funlist != :hydrogen
-
-                    vh_mat, vh_f = vhart(rho_dR[:,1], D2, sum(nel), g, M)
-#                    return vh_f
-                    vlda_mat, vlda = vxc(rho_rs_M[:,1], g, M, N, funlist, gga, nspin)
-
-                    V += (4*pi*vh_mat/sqrt(4*pi)   + vlda_mat/2 /sqrt(pi))
-                    
-                end
-                
-                println("eigen")
-                @time vals, vects = eigen(D2 + V, S)
+                V = V_C + V_L*l*(l+1)
                 for m = -l:l
 
+                    
+                    if funlist != :hydrogen
+
+                        vh_mat, vh_f = vhart( sum(rho_dR[:,:,l+1,l+1+m], dims=2), D2, g, M, l, m, MP, V_L)
+
+                        #                    return vh_f
+                        vlda_mat, vlda = vxc(rho_rs_M[:,], g, M, N, funlist, gga, nspin)
+
+                        V += (4*pi*vh_mat/sqrt(4*pi)   + vlda_mat/2 /sqrt(pi))
+                        
+                    end
+                
+                    println("eigen")
+                    @time vals, vects = eigen(D2 + V, S)
                     VECTS[:,:,spin, l+1, l+1+m] = vects
                     VALS[:,spin, l+1, l+1+m] = vals
                 end
@@ -632,10 +748,11 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
                 
             end
         end
-
+        =#
+        
 #        display_eigs(VALS, nspin, lmax)
         
-        rho_R2_new, rho_dR_new, rho_rs_M_new  = get_rho(VALS, VECTS, nel, filling, nspin, lmax, N, M, invS, g, D2)
+        rho_R2_new, rho_dR_new, rho_rs_M_new, MP_new  = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2)
 
         #println("ChebyshevDFT.Galerkin.do_1d_integral(rho[:,1,1,1], g) ", do_1d_integral(rho_R2[:,1,1,1], g))
 
@@ -644,6 +761,8 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
         rho_R2 = rho_R2_new * mix + rho_R2 *(1-mix)
         rho_dR = rho_dR_new * mix + rho_dR * (1-mix)
         rho_rs_M = rho_rs_M_new * mix + rho_rs_M * (1-mix)
+
+        MP = MP_new*mix + MP_new*(1-mix) #this is approximation for higher multipoles.
 
         eigval_diff = maximum(abs.(filling.*(VALS - VALS_1)))
         println("iter $iter eigval_diff $eigval_diff ")
