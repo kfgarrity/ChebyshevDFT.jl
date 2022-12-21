@@ -31,6 +31,8 @@ using ..LDA:v_LDA_sp
 using ..LDA:e_LDA_sp
 
 using ..AngularIntegration:real_gaunt_dict
+using ..AngularIntegration:makeleb
+
 
 function choose_exc(exc, nspin)
 
@@ -49,7 +51,7 @@ function choose_exc(exc, nspin)
             exc = [:lda_x, :lda_c_vwn]
         end    
 
-        if (typeof(exc) == String && lowercase(exc) == "hydrogen") || (typeof(exc) == Symbol && exc == :hydrogen)
+        if (typeof(exc) == String && lowercase(exc) == "hydrogen") || (typeof(exc) == Symbol && exc == :hydrogen) || (typeof(exc) == String && lowercase(exc) == "H") || (typeof(exc) == Symbol && exc == :H)
             funlist = :hydrogen
             println("Running hydrogen-like atom (no hartree, no exc)")
             gga = false
@@ -112,7 +114,7 @@ end
 
     
 
-function prepare(Z, fill_str, lmax, exc, N, M, g)
+function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
 
     if typeof(Z) == String || typeof(Z) == Symbol
         Z = atoms[String(Z)]
@@ -188,8 +190,10 @@ function prepare(Z, fill_str, lmax, exc, N, M, g)
             end
         end
     end
-  
-    return Z, nel, filling, nspin, lmax, V_C, V_L, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga
+
+    LEB = makeleb(lmaxrho*2+1, lmax=lmaxrho)
+    
+    return Z, nel, filling, nspin, lmax, V_C, V_L, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga, LEB
     
 end
 
@@ -623,6 +627,20 @@ function get_rho_gal(arr,bvals, pts, w, M, invS)
 end
 =#
 
+function vhart_LM(rho_dR, D2, g, N, M, lmaxrho, MP, V_L)
+
+    VH_LM = zeros(N-1, N-1, lmaxrho+1, 2*lmaxrho+1)
+    for l = 0:lmaxrho
+        for m = -l+l
+            VH_LM[:, :, l+1, m+l+1] = vhart(rho_dR[:,l+1, m+l+1], D2, V_L, g, M, l, m, MP)
+        end
+    end
+
+    return VH_LM
+    
+end
+
+
 function vhart(rhor2, D2, V_L, g, M, l, m, MP)
 
     vh_tilde = (D2 + l*(l+1)*V_L) \ rhor2
@@ -632,14 +650,62 @@ function vhart(rhor2, D2, V_L, g, M, l, m, MP)
     
     vh_mat = get_vh_mat(vh_tilde, g, nel, M=M)
     
-    function vh_f(r)
-        if r < 1e-7
-            r = 1e-7
-        end
-        return gal_rep_to_rspace(r, vh_tilde, g) / r  .+ MP[l+1, l+m+1]/g.b^(l+1) * sqrt(pi)/(2*pi) / (2*l+1)
-    end
+#    function vh_f(r)
+#        if r < 1e-7
+#            r = 1e-7
+#        end
+#        return gal_rep_to_rspace(r, vh_tilde, g) / r  .+ MP[l+1, l+m+1]/g.b^(l+1) * sqrt(pi)/(2*pi) / (2*l+1)
+#    end
     
-    return vh_mat, vh_f
+    #    return vh_mat, vh_f
+
+    return vh_mat
+    
+end
+
+function vxc_LM(rho_rs_M, g, M, N, funlist, gga, npin, lmaxrho, LEB)
+
+    #get vxc in r space
+    rho = zeros(M+1, nspin, LEB.N)
+
+
+    #get rho and then VXC in theta / phi / r space
+    VXC_tp = zeros(LEB.N, M+1, nspin)
+    for ntp = 1:LEB.N
+        for spin = 1:nspin
+            for l = 0:lmaxrho
+                for m = -l:l
+                    rho[:, spin] += rho_rs_M[:,l+1, m+l+1] * LEB.Ylm[(l,m)][ntp]
+                end
+            end
+        end
+
+        VXC_tp[ntp, :,:] = vxc(rho, g, M, N, funlist, gga, nspin)
+    end
+
+    #now transform to LM space again
+
+    for spin = 1:nspin
+        for l = 0:lmaxrho
+            for m = -l:l
+                for r = 1:M+1
+                    VXC_LM[r, spin, l+1, l+m+1] =  4*pi*sum(LEB.Ylm[(l,m)][:] .* VXC_tp[:,r,spin] .* LEB.w)
+                end
+            end
+        end
+    end
+
+    VXC_LM_MAT = zeros(N-1,N-1,nspin, lmaxrho+1, 2*lmaxrho+1)
+    for spin = 1:nspin
+        for l = 0:lmaxrho
+            for m = -l:l
+                VXC_LM_MAT[:,:,spin,l+1,l+m+1] = get_gal_rep_matrix_R(VXC_LM_MAT[:,spin,l+1,l+m+1], g, ; N = N)
+            end
+        end
+    end
+
+    return VXC_LM_MAT
+    
 end
 
 
@@ -660,7 +726,7 @@ function vxc(rho, g, M, N, funlist, gga, nspin)
 #    println("size VLDA ", size(VLDA))
     VLDA_mat = get_gal_rep_matrix_R(VLDA[:,1,1,1], g, ; N = N)
     
-    return VLDA_mat, VLDA
+    return VLDA_mat #, VLDA
 end
 
 
@@ -681,6 +747,39 @@ function display_eigs(VALS, nspin,lmax)
 
 end
 
+function solve_small(V_C, V_L, VH_LM, VXC_LM, D2, S, nspin, lmax, funlist, VECTS, VALS)
+
+    VLM = zeros(size(V_C))
+
+    
+    for spin = 1:nspin 
+        for l = 0:(lmax)
+            V = V_C + V_L*l*(l+1)
+            for m = -l:l
+
+                if funlist != :hydrogen  #VHART AND VXC_LM
+                    VLM .= 0.0
+                    for lr = 0:lmaxrho
+                        for mr = -l:l
+                            gcoef = real_gaunt_dict[(lr,mr,l,m,l,m)]
+                            VLM += gcoef * (4*pi*VH_LM[:,:,l+1,l+m+1] + VXC_LM[:,:,spin,l+1,l+m+1])
+                        end
+                    end
+                end
+                
+                #println("eigen")
+                @time vals, vects = eigen(D2 + V + VLM, S)
+                VECTS[:,:,spin, l+1, l+1+m] = vects
+                VALS[:,spin, l+1, l+1+m] = vals
+            end
+        end
+    end
+    
+    return VALS, VECTS
+    
+end
+
+
 function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters = 50, mix = 0.5, mixing_mode=:pulay, exc = missing, lmax = missing, conv_thr = 1e-7, lmaxrho = 0)
 
     if M == -1
@@ -690,8 +789,10 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
         N = g.N
     end
 
+    
+    
     println("prepare")
-    @time Z, nel, filling, nspin, lmax, V_C, V_L,  D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga = prepare(Z, fill_str, lmax, exc, N, M, g)
+    Z, nel, filling, nspin, lmax, V_C, V_L,  D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga, LEB = prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
 
 
     #println("vChebyshevDFT.Galerkin.do_1d_integral(VECTS[:,1,1,1], g) ", do_1d_integral(real.(VECTS[:,1,1,1,1]).^2, g))
@@ -714,50 +815,23 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
         VALS_1[:,:,:,:] = VALS
 
 
-        VH_LM, vh_f_LM = vhart_LM( sum(rho_dR, dims=2), D2, g, M, l, m, MP, V_L)
-        VXC_LM, vlda_LM = vxc_LM( rho_rs_M, g, M, N, funlist, gga, nspin)
-
-        VALS, VECTS = solve_small(V_C, V_L, VH_LM, VXC_LM, D2, S)
-
-        
-        #=
-        for spin = 1:nspin 
-            for l = 0:(lmax)
-
-                V = V_C + V_L*l*(l+1)
-                for m = -l:l
-
-                    
-                    if funlist != :hydrogen
-
-                        vh_mat, vh_f = vhart( sum(rho_dR[:,:,l+1,l+1+m], dims=2), D2, g, M, l, m, MP, V_L)
-
-                        #                    return vh_f
-                        vlda_mat, vlda = vxc(rho_rs_M[:,], g, M, N, funlist, gga, nspin)
-
-                        V += (4*pi*vh_mat/sqrt(4*pi)   + vlda_mat/2 /sqrt(pi))
-                        
-                    end
-                
-                    println("eigen")
-                    @time vals, vects = eigen(D2 + V, S)
-                    VECTS[:,:,spin, l+1, l+1+m] = vects
-                    VALS[:,spin, l+1, l+1+m] = vals
-                end
-                
-                
-            end
+        if funlist != :hydrogen
+            VH_LM = vhart_LM( sum(rho_dR, dims=2), D2, g, N, M, lmax, MP, V_L)
+            VXC_LM = vxc_LM( rho_rs_M, g, M, N, funlist, gga, nspin, lmaxrho, LEB)
+        else
+            VH_LM = zeros(N-1,N-1,lmaxrho+1, lmaxrho*2+1)
+            VXC_LM = zeros(N-1,N-1,nspin, lmaxrho+1, lmaxrho*2+1)
         end
-        =#
         
-#        display_eigs(VALS, nspin, lmax)
+
+        solve_small(V_C, V_L, VH_LM, VXC_LM, D2, S, nspin, lmax, funlist, VECTS, VALS)
+
+
+        #        display_eigs(VALS, nspin, lmax)
         
         rho_R2_new, rho_dR_new, rho_rs_M_new, MP_new  = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2)
 
-        #println("ChebyshevDFT.Galerkin.do_1d_integral(rho[:,1,1,1], g) ", do_1d_integral(rho_R2[:,1,1,1], g))
-
-
-        
+        #mix
         rho_R2 = rho_R2_new * mix + rho_R2 *(1-mix)
         rho_dR = rho_dR_new * mix + rho_dR * (1-mix)
         rho_rs_M = rho_rs_M_new * mix + rho_rs_M * (1-mix)

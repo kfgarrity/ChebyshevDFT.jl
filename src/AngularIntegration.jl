@@ -17,19 +17,38 @@ struct leb
     ϕ::Array{Float64,1}
     
     w::Array{Float64,1}
-    
+    lmax::Int64
+    Ylm::Dict{NTuple{2,Int64}, Vector{Float64}}
     
 end
 
 Base.show(io::IO, l::leb) = begin
     println("Lebedev obj")
-    println("n=$(l.n) N=$(l.N)")
+    println("n=$(l.n) N=$(l.N) lmax=$(l.lmax)")
 end
 
 real_gaunt_dict = Dict{NTuple{6,Int64}, Float64}()
 
 
-function makeleb(n)
+function makeleb(n; lmax = 12 )
+
+    println("makeleb")
+    
+    if n == 0 || n == 1 #special case
+        
+        x = zeros(1)
+        y = zeros(1)
+        z = zeros(1)
+        w = ones(1)
+        θ = zeros(1)
+        ϕ = zeros(1)
+        Ylm = Dict{NTuple{2,Int64}, Vector{Float64}}()
+        Ylm[(0,0)] = [1/sqrt(4*pi)]
+        return leb(1,1,x,y,z,θ,ϕ,w, 0, Ylm)
+        
+    end
+
+    #normal case
     
     for nn = n:n+11
         if Lebedev.isavailable(nn)
@@ -44,7 +63,35 @@ function makeleb(n)
 
     θ, ϕ = get_tp(x,y,z)
 
-    return leb(n,N,x,y,z,θ,ϕ,w)
+
+    ####
+
+    
+    function yfn(t,p)
+        return SphericalHarmonics.computeYlm(t, p, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())
+    end
+
+    data = yfn.(θ, ϕ)
+
+    Ylm = Dict{NTuple{2,Int64}, Vector{Float64}}()
+
+    for l1 = 0:lmax
+        for m1 = -l1:l1
+            Ylm[(l1,m1)] = zeros(N)
+            for nn = 1:N
+                Ylm[(l1,m1)][nn] = data[nn][(l1,m1)]
+            end                
+        end
+    end
+
+    ####
+
+    println("typeof ")
+    for (c,x) =enumerate( [n,N,x,y,z,θ,ϕ,w,lmax,Ylm])
+        println("$c typeof ", typeof(x))
+    end
+    
+    return leb(n,N,x,y,z,θ,ϕ,w,lmax,Ylm)
 
 end
 
