@@ -219,8 +219,8 @@ function get_gal_rep_matrix_R(fn_R, g::gal; N = -1)
     
     INT = zeros(N-1, N-1)
     f = fn_R .* (@view g.w[2:M+2,M])
-    println("get_gal_rep_matrix_R loop fn_R")
-    @time @inbounds for n1 = 1:(N-1)
+#    println("get_gal_rep_matrix_R loop fn_R")
+    @inbounds for n1 = 1:(N-1)
         for n2 = n1:(N-1)
             INT[n1, n2] = sum(  (@view g.bvals[2:M+2,n1,M]).*(@view g.bvals[2:M+2,n2,M]) .* f)
         end
@@ -242,10 +242,10 @@ function get_gal_rep_matrix(fn, g::gal; M = -1, N = -1)
     end
     
     INT = zeros(N-1, N-1)
-    println("fn")
-    @time f = fn.( g.R.(@view g.pts[2:M+2,M])) .* (@view g.w[2:M+2,M])
-    println("get_gal_rep_matrix loop")
-    @time @inbounds for n1 = 1:(N-1)
+#    println("fn")
+    f = fn.( g.R.(@view g.pts[2:M+2,M])) .* (@view g.w[2:M+2,M])
+    #println("get_gal_rep_matrix loop")
+    @inbounds for n1 = 1:(N-1)
         for n2 = n1:(N-1)
             INT[n1, n2] = sum(  (@view g.bvals[2:M+2,n1,M]).*(@view g.bvals[2:M+2,n2,M]) .* f)
         end
@@ -272,8 +272,8 @@ function get_gal_rep_matrix(arr::Vector, g::gal; M = -1)
 
     arr_m = arr_m .* (@view g.w[2:M+2,M])
 
-    println("get_gal_rep_matrix loop arr")
-    @time @inbounds @threads for n1 = 1:(N-1)
+    #println("get_gal_rep_matrix loop arr")
+    @inbounds @threads for n1 = 1:(N-1)
         for n2 = n1:(N-1)
             INT[n1, n2] = sum(  (@view g.bvals[2:M+2,n1,M]).*(@view g.bvals[2:M+2,2,M]) .* arr_m)
         end
@@ -286,12 +286,14 @@ function get_gal_rep_matrix(arr::Vector, g::gal; M = -1)
 end
 
 
-function get_vh_mat(vh_tilde, g::gal, nel; M = -1)
+function get_vh_mat(vh_tilde, g::gal, l, m, MP; M = -1)
 
     if M == -1
         M = g.M
     end
-
+#    println("m l $m $l ")
+#    println("m l $m $l ", MP[l+1, m+l+1])
+    
     N = length(vh_tilde)+1
     
     INT = zeros(N-1, N-1)
@@ -302,7 +304,9 @@ function get_vh_mat(vh_tilde, g::gal, nel; M = -1)
         vh_tilde_vec += g.bvals[2:M+2,n1,M] * vh_tilde[n1]
     end
     
-    f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ nel/g.b * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
+#    f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ nel/g.b * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
+
+    f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
     
     @threads for n1 = 1:(N-1)
         for n2 = 1:(N-1)

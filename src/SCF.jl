@@ -1826,7 +1826,10 @@ function solve_small(spin_lm, VH_LM, vlda_LM, H0_L, vals_r, vects, lmax_rho, N, 
         if hydrogen
             Ham = H0_L[l+1] #+ (VH_mat + VLDA_mat)
         else
-            Ham = H0_L[l+1] + (VH_mat + VLDA_mat) 
+            Ham = H0_L[l+1] + (VH_mat + VLDA_mat )
+
+            println("VLDA ", VLDAt[2:7])
+            
         end                
 
 
