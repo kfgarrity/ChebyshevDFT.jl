@@ -31,17 +31,25 @@ using ..LDA:e_LDA
 using ..LDA:v_LDA_sp
 using ..LDA:e_LDA_sp
 
+
+
 using ..AngularIntegration:real_gaunt_dict
 using ..AngularIntegration:makeleb
-
+using JLD
 
 function choose_exc(exc, nspin)
 
         
 
-    if !ismissing(exc)
+    if ismissing(exc) || (typeof(exc) == String && lowercase(exc) == "lda_internal") || (typeof(exc) == Symbol && exc == :lda_internal)
 
-        #convenience functions
+        
+        println("Running default LDA (VWN)")
+        funlist = :lda_internal
+        gga = false
+        
+    else
+
         if (typeof(exc) == String && lowercase(exc) == "pbe") || (typeof(exc) == Symbol && exc == :pbe)
             exc = [:gga_x_pbe, :gga_c_pbe]
         elseif (typeof(exc) == String && lowercase(exc) == "pbesol") || (typeof(exc) == Symbol && exc == :pbesol)
@@ -61,10 +69,7 @@ function choose_exc(exc, nspin)
         end
         
         funlist,gga = set_functional(exc, nspin=nspin)
-    else
-        println("Running default LDA (VWN)")
-        funlist = :lda
-        gga = false
+        
     end
 
     return funlist, gga
@@ -170,6 +175,8 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
 
 
     D2 =-0.5* g.d2[1:N-1, 1:N-1] /  (b-a)^2*2^2
+    D1 =  g.d1[1:N-1, 1:N-1] /  (b-a)*2
+
     S = g.s[1:N-1, 1:N-1]
 
     invsqrtS = inv(sqrt(S))
@@ -194,7 +201,7 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
 
     LEB = makeleb(lmaxrho*2+1, lmax=lmaxrho)
     
-    return Z, nel, filling, nspin, lmax, V_C, V_L, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga, LEB
+    return Z, nel, filling, nspin, lmax, V_C, V_L,D1, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga, LEB
     
 end
 
@@ -410,11 +417,11 @@ function setup_filling(fill_str, N; lmax_init=0)
 #                println("$l $m $n")
                 if nspin == 1
                     f = filling[n,1,l+1, m+l+1]
-                    @printf "%2i %2i %2i  %4f \n" n l m f
+                    @printf "%2i %2i %2i  %4f \n" (n+l) l m f
                 elseif nspin == 2
                     f1 = filling[n,1,l+1, m+l+1]
                     f2 = filling[n,2,l+1, m+l+1]
-                    @printf "%2i %2i %2i  %4f   %4f \n" n l m  f1 f2
+                    @printf "%2i %2i %2i  %4f   %4f \n" (n+l) l m  f1 f2
                 end
             end
         end
@@ -425,11 +432,12 @@ function setup_filling(fill_str, N; lmax_init=0)
     
 end
 
-function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2)
+function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D1, D2)
 #    println("get rho")
     #rho = zeros(N-1, nspin, lmax+1, 2*lmax+1)
     rho_rs_M_R2 = zeros(M+1, nspin)
     rho_rs_M_R2_LM2 = zeros(M+1, nspin, lmax+1, 2*lmax+1)
+    drho_rs_M_R2_LM2 = zeros(M+1, nspin, lmax+1, 2*lmax+1)
     for spin = 1:nspin
         for l = 0:lmax
             for m = -l:l
@@ -439,10 +447,198 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
                     if fillval < 1e-20
                         break
                     end
+                    println("VECTS ", size(VECTS[:, n, spin, l+1,l+1+m]))
                     t = gal_rep_to_rspace(VECTS[:, n, spin, l+1,l+1+m], g, M=M)
                     rho_rs_M_R2[:,spin] += real(t.*conj(t)) * fillval
                     rho_rs_M_R2_LM2[:,spin, l+1, m+1+l] += real(t.*conj(t)) * fillval
 
+                    dt = gal_rep_to_rspace(VECTS[:, n, spin, l+1,l+1+m], g, M=M, deriv=1)
+                    drho_rs_M_R2_LM2[:,spin, l+1, m+1+l] += real( t .* conj.(dt) + dt .* conj.(t)  ) * fillval
+
+                    
+                end
+            end
+        end
+    end
+
+#    println("z ", rho_rs_M_R2[1,1], " " , rho_rs_M_R2_LM2[1,1, 1, 1] )
+    
+    rho_gal_R2 = zeros(N-1, nspin)
+    rho_gal_dR = zeros(N-1, nspin)
+    rho_rs_M = zeros(M+1, nspin)
+
+    lmaxrho = min(lmaxrho, lmax * 2)
+    rho_rs_M_R2_LM = zeros(M+1, nspin, lmaxrho+1, 2*lmaxrho+1)
+
+    rho_rs_M_LM = zeros(M+1, nspin, lmaxrho+1, lmaxrho*2+1)
+    rho_gal_R2_LM = zeros(N-1, nspin, lmaxrho+1, lmaxrho*2+1)
+    rho_gal_dR_LM = zeros(N-1, nspin, lmaxrho+1, lmaxrho*2+1)
+
+    rho_gal_mulipole_LM = zeros(N-1, nspin, lmaxrho+1, lmaxrho*2+1)
+
+    drho_gal_R2_LM = zeros(N-1, nspin, lmaxrho+1, lmaxrho*2+1)
+    drho_rs_M_LM = zeros(M+1, nspin, lmaxrho+1, lmaxrho*2+1)
+
+    
+    for lr = 0:lmaxrho
+        for mr = -lr:lr
+            for l = 0:lmax
+                for m = -l:l
+                    gcoef = real_gaunt_dict[(lr,mr,l,m,l,m)]
+                    for spin = 1:nspin
+                        rho_rs_M_R2_LM[:,spin, lr+1,mr+lr+1] += gcoef * rho_rs_M_R2_LM2[:,spin, l+1, m+1+l]
+                    end
+                end
+            end
+        end
+    end
+
+    
+    rho_rs_M_R2_LM = rho_rs_M_R2_LM * sqrt(4 * pi)
+
+
+    for spin = 1:nspin
+        for lr = 0:lmaxrho
+            for mr = -lr:lr
+                if sum(abs.(rho_rs_M_R2_LM[:,spin, lr+1,mr+lr+1])) > 1e-10
+                    println("rho $spin  $lr $mr ", sum(abs.(rho_rs_M_R2_LM[:,spin, lr+1,mr+lr+1])))
+                end
+            end
+        end
+    end
+    
+#    println("zz ", rho_rs_M_R2_LM[1,1,1,1])
+    #=
+    for spin = 1:nspin
+#        println("before1")
+        a,b,c,d = get_rho_gal(rho_rs_M_R2[:,spin], g,N=N, invS=invS)
+#        println("length ret ", length(ret))
+        rho_gal_R2[:,spin] += a
+        rho_gal_dR[:,spin] += b
+        rho_rs_M[:,spin]  += c
+    end
+=#
+
+    for spin = 1:nspin
+        for lr = 0:lmaxrho
+            for mr = -lr:lr
+#                for l = 0:lmax
+#                    for m = -l:l
+#                        println("before")
+#                        println("size(rho_rs_M_R2_LM[:,spin, lr+1, mr+lr+1] ", size(rho_rs_M_R2_LM[:,spin, lr+1, mr+lr+1]))
+                a,b,c,d =  get_rho_gal(rho_rs_M_R2_LM[:,spin, lr+1, mr+lr+1], g,N=N, invS=invS, l = lr)
+#                        println("size ret ", size(ret))
+                rho_gal_R2_LM[:,spin, lr+1, mr+lr+1] += a
+                rho_gal_dR_LM[:,spin, lr+1, mr+lr+1 ] += b
+                rho_rs_M_LM[:,spin, lr+1, mr+lr+1]  += c
+                rho_gal_mulipole_LM[:,spin, lr+1, mr+lr+1]  += d
+
+                drho_gal_R2_LM[:,spin, lr+1, mr+lr+1] += D1*a
+                #                    end
+#                end
+            end
+        end
+    end                    
+    for spin = 1:nspin
+        for lr = 0:lmaxrho
+            for mr = -lr:lr
+                drho_rs_M_LM[:,spin, lr+1, mr+lr+1] = gal_rep_to_rspace(drho_gal_R2_LM[:,spin, lr+1, mr+lr+1], g, M=M)
+            end
+        end
+    end
+    
+#    println("sum rho ", sum(abs.(rho_gal_mulipole_LM[:,1, 1,1])), " " , sum(abs.(rho_gal_mulipole_LM[:,2, 1,1])))
+    
+    rho_gal_R2 = rho_gal_R2 / (g.b-g.a) * 2
+    rho_gal_dR = rho_gal_dR/ (g.b-g.a) * 2
+    rho_rs_M = rho_rs_M / (g.b-g.a) * 2
+
+    rho_gal_R2_LM = rho_gal_R2_LM / (g.b-g.a) * 2
+    rho_gal_dR_LM = rho_gal_dR_LM / (g.b-g.a) * 2
+    rho_rs_M_LM = rho_rs_M_LM  / (g.b-g.a) * 2
+    rho_gal_mulipole_LM = rho_gal_mulipole_LM  / (g.b-g.a) * 2
+    
+
+#    println("SIZE ", size(rho_gal_R2_LM), " " , size(rho_gal_mulipole_LM), " lmax rho ", lmaxrho)
+    
+#    println("a ", rho_gal_R2[1]," ", rho_gal_R2_LM[1])
+#    println("b ", rho_gal_dR[1]," ", rho_gal_dR_LM[1])
+#    println("c ", rho_rs_M[1]," ", rho_rs_M_LM[1])
+#    println("d ", rho_gal_R2[1]," ", rho_gal_mulipole_LM[1])
+
+    
+#    println("ChebyshevDFT.Galerkin.do_1d_integral(rho_gal, g) ", do_1d_integral(rho_gal_R2[:,1], g))
+
+    MP = zeros(lmaxrho+1, 2*lmaxrho+1)
+    
+    for spin = 1:nspin
+        for l = 0:lmaxrho
+            for m = -l:l
+                MP[l+1, l+m+1] += do_1d_integral(rho_gal_mulipole_LM[:,spin,l+1,l+m+1], g)
+            end
+        end
+    end
+                #                println("l m $l $m")
+#                println("ChebyshevDFT.Galerkin.do_1d_integral(rho_gal, g) ", do_1d_integral(rho_gal_R2_LM[:,1,l+1,l+m+1], g))
+#                println("ChebyshevDFT.Galerkin.do_1d_integral(rho_muli, g) ", do_1d_integral(rho_gal_mulipole_LM[:,1,l+1,l+m+1], g))
+#            end
+#        end
+#    end
+    
+    
+    if false
+    begin
+        n0 = xxx->ForwardDiff.derivative(xx-> ForwardDiff.derivative(x->gal_rep_to_rspace(x, rho_gal_R2[:,1,1,1], g), xx), xxx)
+        n00 = (n0(0.0)/2.0 )
+#        println("n0 $(n00)")
+    end
+    end
+
+    x = 1.0
+    #println("test gal_rep_to_rspace ", gal_rep_to_rspace(x, rho_gal_R2[:,1], g), " " , gal_rep_to_rspace(x, rho_gal_dR[:,1], g) * x)
+    
+    return rho_gal_R2_LM, rho_gal_dR_LM, rho_rs_M_LM, MP, drho_gal_R2_LM, drho_rs_M_LM, drho_rs_M_R2_LM2
+
+end
+
+
+
+function get_rho_big(VALS, VALS_big, VECTS_big, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2, lm_dict,dict_lm, big_code)
+
+#    println("SIZE VB ", size(VECTS_big))
+
+    Nbig = size(VECTS_big)[1]
+
+#    println("Nbig $Nbig M $M")
+    
+    #rho_rs_M_R2 = zeros(M+1, nspin)
+    rho_rs_M_R2_LM2 = zeros(M+1, nspin, lmax+1, 2*lmax+1, lmax+1, 2*lmax+1)
+    for spin = 1:nspin
+        for l = 0:lmax
+            for m = -l:l
+                for (c_n,n) = enumerate(big_code[(spin, l, m)])
+
+                    #println("$c_n, size VALS, ", size(VALS))
+                    if c_n > N-1
+                        continue
+                    end
+                    VALS[c_n, spin, l+1, l+1+m] = VALS_big[n, spin]
+                    fillval = filling[c_n, spin, l+1, l+m+1]
+#                    println("add fillval $spin $l $m ", fillval)
+                    if fillval < 1e-20
+                        continue
+                    end
+                    for c1 = 1:length(lm_dict)
+                        (ll1,mm1) = dict_lm[c1]
+                        t1 = gal_rep_to_rspace(VECTS_big[(1:(N-1)).+(c1-1)*(N-1), n, spin], g, M=M)
+                        for c2 = 1:length(lm_dict)
+                            (ll2,mm2) = dict_lm[c2]
+                            t2 = gal_rep_to_rspace(VECTS_big[(1:(N-1)).+(c2-1)*(N-1), n, spin], g, M=M)
+                    
+                            #rho_rs_M_R2[:,spin] += real(t.*conj(t)) * fillval
+                            rho_rs_M_R2_LM2[:,spin, ll1+1, mm1+1+ll1, ll2+1, mm2+1+ll2] += real(t1.*conj(t2)) * fillval
+                        end
+                    end
                 end
             end
         end
@@ -465,11 +661,15 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
     
     for lr = 0:lmaxrho
         for mr = -lr:lr
-            for l = 0:lmax
-                for m = -l:l
-                    gcoef = real_gaunt_dict[(lr,mr,l,m,l,m)]
-                    for spin = 1:nspin
-                        rho_rs_M_R2_LM[:,spin, lr+1,mr+lr+1] += gcoef * rho_rs_M_R2_LM2[:,spin, l+1, m+1+l]
+            for l1 = 0:lmax
+                for m1 = -l1:l1
+                    for l2 = 0:lmax
+                        for m2 = -l2:l2
+                            gcoef = real_gaunt_dict[(lr,mr,l1,m1,l2,m2)]
+                            for spin = 1:nspin
+                                rho_rs_M_R2_LM[:,spin, lr+1,mr+lr+1] += gcoef * rho_rs_M_R2_LM2[:,spin, l1+1, m1+1+l1, l2+1, m2+1+l2,]
+                            end
+                        end
                     end
                 end
             end
@@ -479,15 +679,15 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
     
     rho_rs_M_R2_LM = rho_rs_M_R2_LM * sqrt(4 * pi)
 
-    for spin = 1:nspin
-        for lr = 0:lmaxrho
-            for mr = -lr:lr
-                if sum(abs.(rho_rs_M_R2_LM[:,spin, lr+1,mr+lr+1])) > 1e-10
-                    println("rho $spin  $lr $mr ", sum(abs.(rho_rs_M_R2_LM[:,spin, lr+1,mr+lr+1])))
-                end
-            end
-        end
-    end
+    #for spin = 1:nspin
+    #    for lr = 0:lmaxrho
+    #        for mr = -lr:lr
+    #            if sum(abs.(rho_rs_M_R2_LM[:,spin, lr+1,mr+lr+1])) > 1e-10
+    #                println("rho $spin  $lr $mr ", sum(abs.(rho_rs_M_R2_LM[:,spin, lr+1,mr+lr+1])))
+    #            end
+    #        end
+    #    end
+    #end
     
 #    println("zz ", rho_rs_M_R2_LM[1,1,1,1])
     #=
@@ -573,6 +773,9 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
     return rho_gal_R2_LM, rho_gal_dR_LM, rho_rs_M_LM, MP
 
 end
+
+
+
 
 #=
 function rspace(r, B, arr, rfn, rmax)
@@ -691,6 +894,7 @@ function vhart_LM(rho_dR, D2, g, N, M, lmaxrho, lmax, MP, V_L)
 #    println("size rho_dR ", size(rho_dR))
 #    println("lmax rho ", lmaxrho)
     loopmax = min(lmax*2, lmaxrho)
+    #loopmax = lmaxrho
     VH_LM = zeros(N-1, N-1, lmaxrho+1, 2*lmaxrho+1)
 #    println("size VH_LM ", size(VH_LM))
     
@@ -740,6 +944,7 @@ function vxc_LM(rho_rs_M, g, M, N, funlist, gga, nspin, lmax, lmaxrho, LEB)
     rho = zeros(M+1, nspin)
 
     loopmax = min(lmax*2, lmaxrho)
+    #loopmax=lmaxrho
 
 #    for spin = 1:nspin
 #        for l = 0:lmaxrho
@@ -819,17 +1024,36 @@ end
 function vxc(rho, g, M, N, funlist, gga, nspin)
 
 #    println("size rho $(size(rho)) vs ", nspin)
+
+    println("FUNLIST $funlist")
     
     VLDA = zeros(size(rho,1), nspin)
     if nspin == 1
-        rho_col = reshape(rho , length(rho),1)
-        VLDA[:,1] = v_LDA.(rho[:, 1]/ (4*pi))
+        if !ismissing(funlist) && funlist != :lda_internal
+            #e,v = EXC( (@view rho[:,1), funlist, (@view drho[:,1,l,m,:]), (@view ddrho[:,1,l,m,:]), (@view dvsigma[:,1,l,m,:]), THETA[l], gga, r, D1)
+            if gga
+                #e,v = EXC( (@view rho[:,1]/(4*pi)  ), funlist, (@view drho[:,1,l,m,:]), (@view ddrho[:,1,l,m,:]), (@view dvsigma[:,1,l,m,:]), missing, gga, r, D1)
+            else
+                println("USE EXTERNAL LDA?")
+                e,v = EXC( (rho[:,1]/(4*pi)  ), funlist, missing, missing, missing, missing, gga, missing, missing)
+            end
+            VLDA[:,1] = v
+        else
+            rho_col = reshape(rho , length(rho),1)
+            VLDA[:,1] = v_LDA.(rho[:, 1]/ (4*pi))
+        end
     elseif nspin == 2
-        tt =  v_LDA_sp.(rho[:, 1]/ (4*pi), rho[:, 2]/ (4*pi))
-
-#        println("size tt ", size(tt))
-#        println("size blah ", reshape(vcat(tt...), nspin,M+1)' )
-        VLDA[:,:] = reshape(vcat(tt...), nspin,M+1)'
+        if !ismissing(funlist) && funlist != :lda_internal
+            if gga
+                e,v = EXC_sp( ( rho[:,1:2] / (4*pi) ), funlist, (@view drho[:,1:2,:]), (@view ddrho[:,1:2,:]), (@view dvsigma[:,1:3,:]), THETA[l], gga, r, D1)
+            else
+                e,v = EXC_sp( ( rho[:,1:2] /  (4*pi)), funlist, missing, missing, missing, missing, gga, missing, missing)
+            end                        
+            
+        else
+            tt =  v_LDA_sp.(rho[:, 1]/ (4*pi), rho[:, 2]/ (4*pi))
+            VLDA[:,:] = reshape(vcat(tt...), nspin,M+1)'
+        end
     end
 
     VLDA = VLDA * sqrt(4*pi)
@@ -856,6 +1080,7 @@ function display_eigs(VALS, nspin,lmax)
                 end
             end
         end
+        println()
     end
 
 end
@@ -896,7 +1121,7 @@ function solve_small(V_C, V_L, VH_LM, VXC_LM, D2, S, nspin, lmax, lmaxrho, funli
 end
 
 
-function solve_big(V_C, V_L, VH_LM, VXC_LM, D2, S, nspin, lmax, lmaxrho, funlist, VECTS, VALS)
+function solve_big(V_C, V_L, VH_LM, VXC_LM, D2, S, nspin, lmax, lmaxrho, funlist, lm_dict)
 
     VLM = zeros(size(V_C))
 
@@ -904,19 +1129,17 @@ function solve_big(V_C, V_L, VH_LM, VXC_LM, D2, S, nspin, lmax, lmaxrho, funlist
 
     Nsmall = size(V_C)[1]
 
-    lm_dict = Dict()
-    c=0
-    for l = 0:(lmax)
-        for m = -l:l
-            lm_dict[(l,m)] = c
-            c+=1
-        end
-    end
-    
+    c=length(lm_dict)
     Hbig = zeros(Nsmall * c, Nsmall * c)
     Sbig = zeros(Nsmall * c, Nsmall * c)
 
-    
+    N = Nsmall * c
+
+    VECTS_BIG = zeros(Float64, N,N,nspin)
+    VALS_BIG = zeros(Float64, N,nspin)
+
+    println("lmax $lmax ")
+    big_code = Dict()
     for spin = 1:nspin
         Hbig .= 0.0
         Sbig .= 0.0
@@ -930,23 +1153,33 @@ function solve_big(V_C, V_L, VH_LM, VXC_LM, D2, S, nspin, lmax, lmaxrho, funlist
                         if l == l2 && m == m2
                             Hbig[ind1,ind2] += V_C + V_L*l*(l+1)
                             Hbig[ind1,ind2] += D2
-                            Sbig[ind1,ind2] += S
+                            Sbig[ind1,ind2] += S                            
+#                            println("add S $l $m  $l2 $m2")
                         end
 
+                        
+
+                        
                         if funlist != :hydrogen  #VHART AND VXC_LM
                             VLM .= 0.0
                             for lr = 0:lmaxrho
                                 for mr = -lr:lr
                                     gcoef = real_gaunt_dict[(lr,mr,l,m,l2,m2)]
                                     VLM += gcoef * (4*pi*VH_LM[:,:,lr+1,lr+mr+1] + VXC_LM[:,:,spin,lr+1,lr+mr+1])
-                                    Hbig[ind1,ind2] +=  gcoef * (4*pi*VH_LM[:,:,lr+1,lr+mr+1] + VXC_LM[:,:,spin,lr+1,lr+mr+1])
-                                    temp = sum(abs.(gcoef * (4*pi*VH_LM[:,:,lr+1,lr+mr+1] + VXC_LM[:,:,spin,lr+1,lr+mr+1])))
-                                    if abs(temp) > 1e-10
-                                        println("ham sum $lr $mr  $l $m    $l2 $m2 ", sum((gcoef * (4*pi*VH_LM[:,:,lr+1,lr+mr+1] + VXC_LM[:,:,spin,lr+1,lr+mr+1]))))
+                                    t = gcoef * (4*pi*VH_LM[:,:,lr+1,lr+mr+1] + VXC_LM[:,:,spin,lr+1,lr+mr+1])
+                                    if maximum(abs.(t)) > 1e-10
+                                        Hbig[ind1,ind2] +=  t
                                     end
+#                                    temp = sum(abs.(gcoef * (4*pi*VH_LM[:,:,lr+1,lr+mr+1] + VXC_LM[:,:,spin,lr+1,lr+mr+1])))
+#                                    if abs(temp) > 1e-10
+#                                        println("ham sum $lr $mr  $l $m    $l2 $m2 ", sum((gcoef * (4*pi*VH_LM[:,:,lr+1,lr+mr+1] + VXC_LM[:,:,spin,lr+1,lr+mr+1]))))
+#                                    end
                                 end
                             end
-                        end                        
+                        end
+                        if sum(abs.(Hbig[ind1,ind2])) > 1e-10
+                            println("HAM $spin $l $m $l2 $m2 ", sum(abs.(Hbig[ind1,ind2])))
+                        end
                 #println("eigen")
 #                        vals, vects = eigen(D2 + V + VLM, S)
 #                        VECTS[:,:,spin, l+1, l+1+m] = vects
@@ -956,13 +1189,49 @@ function solve_big(V_C, V_L, VH_LM, VXC_LM, D2, S, nspin, lmax, lmaxrho, funlist
             end
             
         end
-        println("sum check ", sum(Hbig - Hbig'), " ", sum(Sbig - Sbig'))
-        println("eigen big")
+#        println("sum check ", sum(Hbig - Hbig'), " ", sum(Sbig - Sbig'))
+#        println("eigen big")
         Hh = Hermitian(Hbig)
         Sh = Hermitian(Sbig)
+        save("data.$spin.jld", "Hh", Hh, "Sh", Sh)
         vals, vects = eigen(Hh, Sh)
-        println("vals spin $spin")
-        println(vals[1:12])
+        
+        VALS_BIG[:,spin] = vals
+        VECTS_BIG[:,:,spin] =vects
+
+        COUNT = zeros(lmax+1, 2*lmax+1)
+
+        Sv = Sh*vects
+        
+        for n = 1:(N-1)
+            tmax = 0.0
+            l_m = 0
+            m_m = 0
+            for l = 0:(lmax)
+                for m = -l:l
+                    ind = (1:Nsmall) .+ Nsmall*lm_dict[(l,m)]
+                    t = sum(abs.( real.(vects[ind,n] .* conj(Sv[ind,n])))) - COUNT[l+1, m+l+1]*0.001
+                    if t > tmax
+                        tmax = t
+                        l_m = l
+                        m_m = m
+                    end
+                end
+            end
+            COUNT[l_m+1, m_m+l_m+1] += 1.0
+            
+            #println("val $n  $spin   $l_m $m_m  $(vals[n])")
+            if ! ((spin,l_m, m_m) in keys(big_code))
+                big_code[(spin,l_m, m_m)] = Int64[]
+#                println("add big_code ", (spin,l_m, m_m))
+            end
+            push!(big_code[(spin,l_m, m_m)], n)
+#            println("spin assign $n $(VALS_BIG[n,spin]) to $((spin,l_m, m_m))")
+        end
+#        println()
+            
+        #        println("vals spin $spin")
+#        println(vals[1:12])
 #        println("Hh")
 #        println(Hh)
 #        println("Sh")
@@ -970,12 +1239,12 @@ function solve_big(V_C, V_L, VH_LM, VXC_LM, D2, S, nspin, lmax, lmaxrho, funlist
         
     end
     
-#    return VALS, VECTS
+    return VALS_BIG, VECTS_BIG, big_code
     
 end
 
 
-function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters = 50, mix = 0.5, mixing_mode=:pulay, exc = missing, lmax = missing, conv_thr = 1e-7, lmaxrho = 0)
+function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters = 50, mix = 0.5, mixing_mode=:pulay, exc = missing, lmax = missing, conv_thr = 1e-7, lmaxrho = 0, mix_lm = false)
 
     if M == -1
         M = g.M
@@ -987,15 +1256,27 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     
     
     println("prepare")
-    Z, nel, filling, nspin, lmax, V_C, V_L,  D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga, LEB = prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
+    Z, nel, filling, nspin, lmax, V_C, V_L, D1, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga, LEB = prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
 
 
+    lm_dict = Dict()
+    dict_lm = Dict()
+    c=0
+    for l = 0:(lmax)
+        for m = -l:l
+            lm_dict[(l,m)] = c
+            c+=1
+            dict_lm[c] = (l,m)
+        end
+    end
+
+    
     println("lmaxrho $lmaxrho")
     
     #println("vChebyshevDFT.Galerkin.do_1d_integral(VECTS[:,1,1,1], g) ", do_1d_integral(real.(VECTS[:,1,1,1,1]).^2, g))
     
 #    println("get rho")
-    rho_R2, rho_dR, rho_rs_M, MP = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2)
+    rho_R2, rho_dR, rho_rs_M, MP, drho_gal_R2_LM, drho_rs_M_LM, drho_rs_M_R2_LM2 = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D1, D2)
     println("MP")
     println(MP)
 
@@ -1034,14 +1315,27 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
 
         #        println("funlist $funlist")
 
-        solve_small(V_C, V_L, VH_LM, VXC_LM, D2, S, nspin, lmax, lmaxrho, funlist, VECTS, VALS)
-        solve_big(V_C, V_L, VH_LM, VXC_LM, D2, S, nspin, lmax, lmaxrho, funlist, VECTS, VALS)
+        if mix_lm == false
+            solve_small(V_C, V_L, VH_LM, VXC_LM, D2, S, nspin, lmax, lmaxrho, funlist, VECTS, VALS)
+        else
+            VALS_BIG, VECTS_BIG, big_code = solve_big(V_C, V_L, VH_LM, VXC_LM, D2, S, nspin, lmax, lmaxrho, funlist, lm_dict)
+        end
 
 
+        #println("SIZE VECTS ", size(VECTS))
+        #println("SIZE VECTS BIG ", size(VECTS_BIG))
+        #        return VECTS_BIG, VALS_BIG, big_code
+        
         #        display_eigs(VALS, nspin, lmax)
         
-        rho_R2_new, rho_dR_new, rho_rs_M_new, MP_new  = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2)
-
+        if mix_lm == false
+            rho_R2_new, rho_dR_new, rho_rs_M_new, MP_new, drho_gal_R2_LM,drho_rs_M_LM  = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D1, D2)
+        else
+            println("big")
+            rho_R2_new, rho_dR_new, rho_rs_M_new, MP_new  = get_rho_big(VALS, VALS_BIG, VECTS_BIG, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2, lm_dict, dict_lm, big_code) 
+        end
+        
+        
         #mix
         rho_R2 = rho_R2_new * mix + rho_R2 *(1-mix)
         rho_dR = rho_dR_new * mix + rho_dR * (1-mix)
@@ -1066,7 +1360,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     println()
 
 #    println("size rho_rs_M", size(rho_rs_M))
-    return VALS, VECTS, rho_R2, VH_LM , VXC_LM
+    return VALS, VECTS, rho_R2, VH_LM , VXC_LM, drho_gal_R2_LM, drho_rs_M_LM, rho_rs_M, drho_rs_M_R2_LM2
     
 end #end dft
 

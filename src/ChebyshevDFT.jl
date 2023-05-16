@@ -12,6 +12,8 @@ precalc_sphere()
 
 include("AngularIntegration.jl")
 
+AngularIntegration.fill_gaunt()
+
 include("LDA.jl")
 include("UseLibxc.jl")
 

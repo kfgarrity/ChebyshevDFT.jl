@@ -125,7 +125,7 @@ function get_gal_rep(arr::Array{1}, g::gal; M=-1, invS=missing)
 
 end
 
-function get_rho_gal(rho_rs_M_R2,g::gal; N=-1, invS=missing)
+function get_rho_gal(rho_rs_M_R2,g::gal; N=-1, invS=missing, l=0)
 
     if N == -1
         N = g.N
@@ -141,15 +141,20 @@ function get_rho_gal(rho_rs_M_R2,g::gal; N=-1, invS=missing)
 
     rho_rs_M = rho_rs_M_R2 ./ g.R.(g.pts[M, 2:M+2]).^2
 
+    t_mp = rho_rs_M_R2 .* g.w[M,2:M+2] .* g.R.(g.pts[M, 2:M+2]).^l
+    
     rho_gal = zeros(Float64, N-1)
     rho_gal_dR = zeros(Float64, N-1)
+    rho_multipole = zeros(Float64, N-1)
     for i = 1:N-1
         rho_gal[i] =   sum( (g.bvals[M,i,2:M+2]).*nrR )
         rho_gal_dR[i] =   sum( (g.bvals[M,i,2:M+2]).*nrR_dR )
+        rho_multipole[i] = sum( (g.bvals[M,i,2:M+2]).*t_mp )
     end
 
 #    println("size invS ", size(invS), " rho_gal ", size(rho_gal), " ", size(rho_gal_dR))
-    return invS*rho_gal ,  invS*rho_gal_dR, rho_rs_M
+    println("ret 4 ")
+    return invS*rho_gal ,  rho_gal_dR, rho_rs_M, rho_multipole
     
 end
 
@@ -215,7 +220,7 @@ function get_gal_rep_matrix_R(fn_R, g::gal; N = -1)
     f = fn_R .* (@view g.w[M, 2:M+2])
     println("get_gal_rep_matrix_R loop")
     @time for n1 = 1:(N-1)
-        for n2 = 1:(N-1)
+        @inbounds for n2 = 1:(N-1)
             INT[n1, n2] = sum(  (@view g.bvals[M, n1, 2:M+2]).*(@view g.bvals[M, n2,2:M+2]) .* f)
         end
     end

@@ -14,8 +14,6 @@ struct gal
     b::Float64
     α::Float64
     bvals::Array{Float64, 3}
-    dbvals::Array{Float64, 3}
-#    ddbvals::Array{Float64, 3}
     pts::Array{Float64, 2}
     w::Array{Float64, 2}
     s::Array{Float64, 2}
@@ -24,12 +22,9 @@ struct gal
     d2::Array{Float64, 2}
     r
     invr
-    dr
     R
     X
     B
-    dB
-
 end
 
 Base.show(io::IO, g::gal) = begin
@@ -47,12 +42,11 @@ function makegal(N,a,b; α=0.0, M = -1)
     end
 
     r, invr = get_r(α)
-
-    
-    B, dB = get_cheb_bc_grid(N, r)
+    B = get_cheb_bc_grid(N, r)
     
     s,d1,d2 = get_sd(r, B, α)
 
+    pts, w, bvals = setup_integral_mats_grid_new(N, M, r, invr,  B)
     #    println(size(bvals))
 
     function R(x)
@@ -61,11 +55,8 @@ function makegal(N,a,b; α=0.0, M = -1)
     function X(r)
         return -1.0 + 2 * (a - r)/(a-b)
     end
-    dr = rrr->ForwardDiff.derivative(rr-> r.(X.(rr)), rrr)
 
-    pts, w, bvals, dbvals = setup_integral_mats_grid_new(N, M, r, invr, dr,  B)
-    
-    return gal(N,M,a,b,α,bvals,dbvals,pts,w,s,inv(s),d1,d2,r,invr,dr, R,X,B,dB)
+    return gal(N,M,a,b,α,bvals,pts,w,s,inv(s),d1,d2,r,invr,R,X,B)
 
 end
 
@@ -74,7 +65,7 @@ function do_1d_integral(f, g::gal; M=-1)
         M = g.M
     end
 
-    return sum( (@view g.w[2:M+2M]) .* f.(g.R.(@view g.pts[2:M+2,M]))) * (g.b - g.a) / 2.0
+    return sum( (@view g.w[M,2:M+2]) .* f.(g.R.(@view g.pts[M,2:M+2]))) * (g.b - g.a) / 2.0
 
 end
 
@@ -85,7 +76,7 @@ function do_1d_integral(arr::Vector, g::gal, M=-1)
     N = length(arr)
     ret = zero(arr[1])
     for c = 1:N
-        ret += arr[c] *  sum(g.bvals[2:M+2, c, M] .* g.w[2:M+2,M])
+        ret += arr[c] *  sum(g.bvals[M, c, 2:M+2] .* g.w[M, 2:M+2])
     end
     return ret * (g.b - g.a)/ 2.0
 end
@@ -99,14 +90,14 @@ function get_gal_rep(f, g::gal; N=-1, M=-1, invS=missing)
         N = g.N
     end
     if ismissing(invS)
-        invS = inv(g.s[1:N-1, 1:N-1])
+        invS = inv(gal.s[1:N, 1:N])
     end
 
-    nr = f.(g.R.(g.pts[2:M+2,M])) .*g.w[2:M+2,M]
+    nr = f.(g.R.(g.pts[M, 2:M+2])) .*g.w[M,2:M+2]
     
     g_rep = zeros(typeof(nr[1]), g.N-1)
     for i = 1:(g.N-1)
-        g_rep[i] =   sum( (@view g.bvals[2:M+2,i,M]).*nr )
+        g_rep[i] =   sum( (@view g.bvals[M,i,2:M+2]).*nr )
     end
     
     return invS*g_rep
@@ -123,18 +114,18 @@ function get_gal_rep(arr::Array{1}, g::gal; M=-1, invS=missing)
         invS = inv(gal.s[1:N, 1:N])
     end
     
-    arrw = arr .* g.w[2:M+2,M]
+    arrw = arr .* g.w[M,2:M+2]
     
     g_rep = zeros(typeof(arr[1]), g.N-1)
     for i = 1:(g.N-1)
-        g_rep[i] =   sum((@view g.bvals[2:M+2,i,M]).*arrw )
+        g_rep[i] =   sum((@view g.bvals[M,i,2:M+2]).*arrw )
     end
     
     return invS*g_rep
 
 end
 
-function get_rho_gal(rho_rs_M_R2,g::gal; N=-1, invS=missing, l = 0, D1=missing)
+function get_rho_gal(rho_rs_M_R2,g::gal; N=-1, invS=missing)
 
     if N == -1
         N = g.N
@@ -145,51 +136,37 @@ function get_rho_gal(rho_rs_M_R2,g::gal; N=-1, invS=missing, l = 0, D1=missing)
     
     M = length(rho_rs_M_R2)-1
     
-    nrR = rho_rs_M_R2 .* g.w[2:M+2,M]
-    nrR_dR = rho_rs_M_R2 .* g.w[2:M+2,M] ./ g.R.(g.pts[2:M+2,M])
+    nrR = rho_rs_M_R2 .* g.w[M,2:M+2]
+    nrR_dR = rho_rs_M_R2 .* g.w[M,2:M+2] ./ g.R.(g.pts[M, 2:M+2]).^1
 
-    rho_rs_M = rho_rs_M_R2 ./ g.R.(g.pts[2:M+2,M]).^2
+    rho_rs_M = rho_rs_M_R2 ./ g.R.(g.pts[M, 2:M+2]).^2
 
     rho_gal = zeros(Float64, N-1)
     rho_gal_dR = zeros(Float64, N-1)
-    rho_gal_multipole = zeros(Float64, N-1)
-
-    nrR_mp = rho_rs_M_R2 .* g.w[2:M+2,M] .* g.R.(g.pts[2:M+2,M]).^l
-    
     for i = 1:N-1
-        rho_gal[i] =   sum( (g.bvals[2:M+2,i,M]).*nrR )
-        rho_gal_dR[i] =   sum( (g.bvals[2:M+2,i,M]).*nrR_dR )
-        rho_gal_multipole[i] =   sum( (g.bvals[2:M+2,i,M]).*nrR_mp )
+        rho_gal[i] =   sum( (g.bvals[M,i,2:M+2]).*nrR )
+        rho_gal_dR[i] =   sum( (g.bvals[M,i,2:M+2]).*nrR_dR )
     end
 
-    
-    #    println("size invS ", size(invS), " rho_gal ", size(rho_gal), " ", size(rho_gal_dR))
-    return invS*rho_gal ,  rho_gal_dR, rho_rs_M, invS*rho_gal_multipole
+#    println("size invS ", size(invS), " rho_gal ", size(rho_gal), " ", size(rho_gal_dR))
+    return invS*rho_gal ,  rho_gal_dR, rho_rs_M
     
 end
 
 
-function gal_rep_to_rspace(r, rep, g::gal; deriv=0)
+function gal_rep_to_rspace(r, rep, g::gal)
     N = length(rep)
     f = zeros(typeof(rep[1]), size(r))
 
-    if deriv==0
-        for c = 1:N
-            f += g.B[c].(g.r.(g.X.(r)))*rep[c]
-        end
-    elseif deriv==1
-        for c = 1:N
-            f += g.dB[c].(g.r.(g.X.(r)))*rep[c]
-        end
-    else
-        println("deriv must be 0 or 1 you said $deriv")
+    for c = 1:N
+        f += g.B[c].(g.r.(g.X.(r)))*rep[c]
     end
-        
+
     return f
 end
 
 
-function gal_rep_to_rspace(rep, g::gal; M = -1, deriv=0)
+function gal_rep_to_rspace(rep, g::gal; M = -1)
     
     if M == -1
         M = g.M
@@ -198,24 +175,15 @@ function gal_rep_to_rspace(rep, g::gal; M = -1, deriv=0)
     N = length(rep)
     f = zeros(typeof(rep[1]), M+1)
     
-    if deriv == 0
-        for c = 1:N
-            f += g.bvals[2:M+2,c,M]*rep[c]
-        end
-    elseif deriv == 1
-        for c = 1:N
-            f += g.dbvals[2:M+2,c,M]*rep[c]
-        end
-    else
-        println("deriv must be 0 or 1 you said $deriv")
+    for c = 1:N
+        f += g.bvals[M, c, 2:M+2]*rep[c]
     end
-        
-        
+
     return f
 end
 
 
-function gal_rep_to_rspace(r::Number, rep, g::gal; deriv=0)
+function gal_rep_to_rspace(r::Number, rep, g::gal)
 
     if r > g.b
         return 0.0
@@ -227,33 +195,11 @@ function gal_rep_to_rspace(r::Number, rep, g::gal; deriv=0)
     f = zeros(typeof(rep[1]), size(r))
 
     f = zero(typeof(rep[1]))
-
-    DR = g.dr(r)
-    #    println("dr $dr")
-    if deriv==0
-        for c = 1:N
-            f += g.B[c].(g.r.(g.X.(r)))*rep[c]
-        end
-    elseif deriv==1
-        println("1 one")
-        cc=0
-        for c = 1:N
-#            cc=c
-#            function aaa(xx)
-#                g.B[cc].(g.r.(g.X.(xx)))
-#            end
-            #            println("c $c $(aaa(r))  $(g.dB[cc].(g.r.(g.X.(r))))")
-            
-            f += g.dB[c].(g.r.(g.X.(r)))*rep[c] * DR
-        end
-#    elseif deriv==2
-#        for c = 1:N
-#            f += g.ddB[c].(g.r.(g.X.(r)))*rep[c]
-#        end
-    else
-        println("deriv $deriv cannot be greater than 1")
-    end        
     
+    for c = 1:N
+        f += g.B[c].(g.r.(g.X.(r)))*rep[c]
+    end
+
     return f
 end
 
@@ -266,16 +212,15 @@ function get_gal_rep_matrix_R(fn_R, g::gal; N = -1)
     M = length(fn_R)-1
     
     INT = zeros(N-1, N-1)
-    f = fn_R .* (@view g.w[2:M+2,M])
-    #    println("get_gal_rep_matrix_R loop fn_R")
-    @inbounds for n1 = 1:(N-1)
-        for n2 = n1:(N-1)
-            INT[n1, n2] = sum(  (@view g.bvals[2:M+2,n1,M]).*(@view g.bvals[2:M+2,n2,M]) .* f)
+    f = fn_R .* (@view g.w[M, 2:M+2])
+    println("get_gal_rep_matrix_R loop")
+    @time for n1 = 1:(N-1)
+        for n2 = 1:(N-1)
+            INT[n1, n2] = sum(  (@view g.bvals[M, n1, 2:M+2]).*(@view g.bvals[M, n2,2:M+2]) .* f)
         end
     end
-
-
-    return (INT+INT') - diagm(diag(INT))
+    
+    return (INT+INT')/2.0
 
 end
 
@@ -290,16 +235,16 @@ function get_gal_rep_matrix(fn, g::gal; M = -1, N = -1)
     end
     
     INT = zeros(N-1, N-1)
-    #    println("fn")
-    f = fn.( g.R.(@view g.pts[2:M+2,M])) .* (@view g.w[2:M+2,M])
-    #println("get_gal_rep_matrix loop")
-    @inbounds for n1 = 1:(N-1)
-        for n2 = n1:(N-1)
-            INT[n1, n2] = sum(  (@view g.bvals[2:M+2,n1,M]).*(@view g.bvals[2:M+2,n2,M]) .* f)
+    println("fn")
+    @time f = fn.( g.R.(@view g.pts[M, 2:M+2])) .* (@view g.w[M, 2:M+2])
+    println("get_gal_rep_matrix loop")
+    @time @threads for n1 = 1:(N-1)
+        for n2 = 1:(N-1)
+            INT[n1, n2] = sum(  (@view g.bvals[M, n1, 2:M+2]).*(@view g.bvals[M, n2,2:M+2]) .* f)
         end
     end
     
-    return (INT+INT')  - diagm(diag(INT))
+    return (INT+INT')/2.0
 
 end
 
@@ -315,33 +260,29 @@ function get_gal_rep_matrix(arr::Vector, g::gal; M = -1)
 
     arr_m = zeros(M+1)
     for n1 = 1:N-1
-        arr_m += g.bvals[2:M+2,n1,M] * arr[n1]
+        arr_m += g.bvals[M, n1, 2:M+2] * arr[n1]
     end
 
-    arr_m = arr_m .* (@view g.w[2:M+2,M])
-
-    #println("get_gal_rep_matrix loop arr")
-    @inbounds @threads for n1 = 1:(N-1)
-        for n2 = n1:(N-1)
-            INT[n1, n2] = sum(  (@view g.bvals[2:M+2,n1,M]).*(@view g.bvals[2:M+2,2,M]) .* arr_m)
+    arr_m = arr_m .* (@view g.w[M, 2:M+2])
+    
+    @threads for n1 = 1:(N-1)
+        for n2 = 1:(N-1)
+            INT[n1, n2] = sum(  (@view g.bvals[M, n1, 2:M+2]).*(@view g.bvals[M, n2,2:M+2]) .* arr_m)
         end
     end
     
-    return (INT+INT') - diagm(diag(INT))
-
+    return (INT+INT')/2.0
     
     
 end
 
 
-function get_vh_mat(vh_tilde, g::gal, l, m, MP; M = -1)
+function get_vh_mat(vh_tilde, g::gal, nel; M = -1)
 
     if M == -1
         M = g.M
     end
-    #    println("m l $m $l ")
-    #    println("m l $m $l ", MP[l+1, m+l+1])
-    
+
     N = length(vh_tilde)+1
     
     INT = zeros(N-1, N-1)
@@ -349,22 +290,14 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP; M = -1)
     vh_tilde_vec = zeros(M+1)
 
     for n1 = 1:N-1
-        vh_tilde_vec += g.bvals[2:M+2,n1,M] * vh_tilde[n1]
+        vh_tilde_vec += g.bvals[M, n1, 2:M+2] * vh_tilde[n1]
     end
     
-    #    f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ nel/g.b * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
-
-    #f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
-    #    l=0
-    #    m=0
-    if l == 0
-        f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
-    else
-        f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ 0.0*MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
-    end        
+    f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[M, 2:M+2]))  .+ nel/g.b * sqrt(pi)/(2*pi))  .* (@view g.w[M, 2:M+2])
+    
     @threads for n1 = 1:(N-1)
         for n2 = 1:(N-1)
-            INT[n1, n2] = sum(  (@view g.bvals[2:M+2,n1,M]).*(@view g.bvals[2:M+2,n2,M]) .* f)
+            INT[n1, n2] = sum(  (@view g.bvals[M, n1, 2:M+2]).*(@view g.bvals[M, n2,2:M+2]) .* f)
         end
     end
     
@@ -391,7 +324,6 @@ function get_cheb_bc_grid(N, r; vartype=Float64)
     end
 
     B3 = []
-    dB3 = []
     for (c, b) in enumerate(B2)
         #push!(B3, b / sqrt(integrate(b^2, -1, 1)))
         #        println("b $b r(0.1) $(r(0.1))")
@@ -399,20 +331,16 @@ function get_cheb_bc_grid(N, r; vartype=Float64)
         function g(x)
             return b(r(x))^2
         end
-        s=sqrt(QuadGK.quadgk(g, -1,1, rtol=1e-10)[1])
-        
-        push!(B3, b / s)
-        db =  x->ForwardDiff.derivative(b/s, x)
-        push!(dB3, db )
+        push!(B3, b / sqrt(QuadGK.quadgk(g, -1,1, rtol=1e-10)[1]))
         
     end
-    return B3, dB3
+    return B3
     
 end
 
 
 function get_r(α)
-    
+
     b = 1.0
     a = -1.0
     β = (b-a) / ((exp(α * (b-a))- 1 ) )
@@ -484,7 +412,7 @@ function get_sd(r, B, α)
         return B[C1](r(x))*B1[C2](x)
     end
 
-    println("derivs")
+    #   println("derivs")
     for c1 in 1:length(B)
         for (c2, b2) in enumerate(B)
             C1=c1
@@ -493,14 +421,14 @@ function get_sd(r, B, α)
             #            if c1 == c2
             #                d1[c1,c2] = 0.0
             #            else
-            #d1[c1,c2] = QuadGK.quadgk(d1int, -1,1, atol=0.5e-10)[1]
+            #                d1[c1,c2] = QuadGK.quadgk(d1int, -1,1, rtol=0.5e-10)[1]
             #            end
         end
     end
     
     S = (S+S')/2.0
     d2 = (d2 + d2')/2.0
-    d1 = (d1 - d1')/2.0
+    d1 = (d1 - d2')/2.0
 
     return S, d1, d2
 end
@@ -545,19 +473,16 @@ function setup_integrals(N)
 end
 
 
-function setup_integral_mats_grid_new(NN, Nmax, r, invr, dr, B)
+function setup_integral_mats_grid_new(NN, Nmax, r, invr, B)
 
     #    println("setup")
     begin
         #Nmax = Int64(round(NN * 2.0 + 3))
         #        println("Nmax $Nmax")
-        PTS = zeros(Nmax+3, Nmax)
-        W = zeros(Nmax+3, Nmax)
+        PTS = zeros(Nmax, Nmax+3)
+        W = zeros(Nmax, Nmax+3)
 
-        Bvals = zeros(Nmax+3,NN-1,Nmax)
-
-        dBvals = zeros(Nmax+3,NN-1,Nmax)
-#        ddBvals = zeros(Nmax+3,NN-1,Nmax)
+        Bvals = zeros(Nmax,NN-1,Nmax+3)
         
 
         #        r, invr = get_r(α)
@@ -571,9 +496,6 @@ function setup_integral_mats_grid_new(NN, Nmax, r, invr, dr, B)
     function get(x)
         return B[nnX](x)
     end
-
-    dget = x->ForwardDiff.derivative(get, x)
-    
     
     for N = 1:Nmax
         #for N = [Nmax]
@@ -581,26 +503,28 @@ function setup_integral_mats_grid_new(NN, Nmax, r, invr, dr, B)
 
         w, pts = setup_integrals(N);
 
-        PTS[1:N+3,N] = invr.(pts)
-
-#        DR = dr.(pts)
-        
-        W[1:N+3, N] = w .* dinvr.(pts)
+        PTS[N,1:N+3] = invr.(pts)
+        W[N,1:N+3] = w .* dinvr.(pts)
 
         #        PTS[N,1:N+3] = pts
         #        W[N,1:N+3] = w 
         
         for nn = 1:(NN-1)
             nnX = nn
-            Bvals[1:N+3, nn, N] = get.(Float64.(pts))
-            dBvals[1:N+3, nn, N] = dget.(Float64.(pts)) #.* DR
+            #Bvals[N, nn, 1:N+3] = B[nn].(r.(Float64.(pts)))
 
-            #            ddBvals[1:N+3, nn, N] = ddget.(Float64.(pts))
+            Bvals[N, nn, 1:N+3] = get.(Float64.(pts))
+            
+            #Bvals[N, nn, 1:N+3] = get.(invr.(Float64.(pts)))
+            #Bvals[N, nn, 1:N+3] = get.(Float64.(pts))
+
+
+            #Bvals[N, nn, 1:N+3] = B[nn].(r.(pts))
         end
         
     end
 
-    return PTS, W, Bvals, dBvals
+    return PTS, W, Bvals
     
 end
 
