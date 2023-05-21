@@ -152,33 +152,45 @@ function EXC(n, funlist, drho, ddrho, dvsigma, theta, gga, r, D1)
 #        sigma = ((drho./(2* kf .* n) ).^2)
     #    sigma = drho.^2
 
-        sigma = drho[:,1].^2
+        sigma = drho[:,1].^2 
+#        println("size(drho) $(size(drho))  size r $(size(r))")
         sigma[2:end] += r[2:end].^(-2) .* ( drho[2:end,2].^2 + sin(theta)^(-2)* drho[2:end,3].^2    )
 
     end
 
     #    drho_s  = drho 
     #sigma_s = drho[:,1].^2 + drho[:,2].^2 + drho[:,3].^2
+    println(n[1:2], "sigma ", sigma[1:2])
     
     for fun in funlist
         if gga
+#            println("size ", size(n), size(sigma))
 #            println("$fun ")
 #            println(typeof(n), " " , typeof(sigma))
+
+#            println("n $(n[1]) sigma $(sigma[1])")
             ret = evaluate(fun, rho=collect(n), sigma=sigma )
             vsigma = ret.vsigma[:] 
             
             vrho = ret.vrho
 
+#            arr = r[2:end].^2 .* drho[2:end,1] .* vsigma[2:end]
+#            rep = get_gal_rep(arr, g20, N=N, invS=invS)
+#            my_deriv = gal_rep_to_rspace(rep, g20, M=M, deriv=1)
+#            v[2:end] += -2.0*r[2:end].^-2 .* my_deriv
+            
             #1
             v[2:end] += - 4.0 * r[2:end].^(-1) .*  ( ( vsigma[2:end] .* drho[2:end,1]))
             v += -2.0*calc_D((vsigma .* drho[:,1])  , n, D1, r)
 
+#            println("x ", - 4.0 * r[2:end].^(-1) .*  ( ( vsigma[2:end] .* drho[2:end,1])) + -2.0*calc_D((vsigma .* drho[:,1])  , n, D1, r)[2:end])
+            
             #2
             v[2:end] +=  -2.0/sin(theta) * r[2:end].^(-2) .* (sin(theta) * dvsigma[2:end,2] .* drho[2:end, 2] + sin(theta) * vsigma[2:end] .* ddrho[2:end, 2] + cos(theta) * drho[2:end, 2] .* vsigma[2:end])
 
             #3
             v[2:end] +=  -2.0/sin(theta)^2 * r[2:end].^(-2) .* ( dvsigma[2:end,3] .* drho[2:end, 3] + vsigma[2:end] .* ddrho[2:end, 3])
-            
+
             
             #v += -2.0 /sin(theta) * vsigma .* (r.^(-1) .* ( cos(theta)  
             
@@ -189,7 +201,7 @@ function EXC(n, funlist, drho, ddrho, dvsigma, theta, gga, r, D1)
         end            
 
         v +=  vrho[:]
-
+        println("vrho ", vrho[1:2])
         
         #        println(ret)
         #        println("size r ", size(r), " vs ", size(ret.vsigma))

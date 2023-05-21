@@ -11,19 +11,24 @@ using ForwardDiff
 using QuadGK
 using FastSphericalHarmonics
 using ..Galerkin:get_gal_rep_matrix
+using ..Galerkin:get_gal_rep
 using ..Galerkin:get_gal_rep_matrix_R
 using ..Galerkin:get_rho_gal
 using ..Galerkin:gal_rep_to_rspace
 using ..Galerkin:get_vh_mat
 using ..Galerkin:do_1d_integral
+using ..Galerkin:get_r_grid
 
 include("Atomlist.jl")
 
 using ..UseLibxc:set_functional
-using ..UseLibxc:EXC
-using ..UseLibxc:EXC_sp
-using ..UseLibxc:smooth
-using ..UseLibxc:getVsigma
+#using ..UseLibxc:EXC
+#using ..UseLibxc:EXC_sp
+#using ..UseLibxc:smooth
+#using ..UseLibxc:getVsigma
+
+using Libxc
+
 
 using ..LDA:v_LDA
 using ..LDA:e_LDA
@@ -200,8 +205,10 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
     end
 
     LEB = makeleb(lmaxrho*2+1, lmax=lmaxrho)
-    
-    return Z, nel, filling, nspin, lmax, V_C, V_L,D1, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga, LEB
+
+    R = get_r_grid(g, M=M)
+    R = R[2:M+2]
+    return Z, nel, filling, nspin, lmax, V_C, V_L,D1, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga, LEB, R
     
 end
 
@@ -432,7 +439,7 @@ function setup_filling(fill_str, N; lmax_init=0)
     
 end
 
-function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D1, D2)
+function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga)
 #    println("get rho")
     #rho = zeros(N-1, nspin, lmax+1, 2*lmax+1)
     rho_rs_M_R2 = zeros(M+1, nspin)
@@ -452,9 +459,10 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
                     rho_rs_M_R2[:,spin] += real(t.*conj(t)) * fillval
                     rho_rs_M_R2_LM2[:,spin, l+1, m+1+l] += real(t.*conj(t)) * fillval
 
-                    dt = gal_rep_to_rspace(VECTS[:, n, spin, l+1,l+1+m], g, M=M, deriv=1)
-                    drho_rs_M_R2_LM2[:,spin, l+1, m+1+l] += real( t .* conj.(dt) + dt .* conj.(t)  ) * fillval
-
+                    if true
+                        dt = gal_rep_to_rspace(VECTS[:, n, spin, l+1,l+1+m], g, M=M, deriv=1)
+                        drho_rs_M_R2_LM2[:,spin, l+1, m+1+l] += real( t .* conj.(dt) + dt .* conj.(t)  ) * fillval
+                    end
                     
                 end
             end
@@ -469,15 +477,19 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
 
     lmaxrho = min(lmaxrho, lmax * 2)
     rho_rs_M_R2_LM = zeros(M+1, nspin, lmaxrho+1, 2*lmaxrho+1)
+    drho_rs_M_R2_LM = zeros(M+1, nspin, lmaxrho+1, 2*lmaxrho+1)    
 
     rho_rs_M_LM = zeros(M+1, nspin, lmaxrho+1, lmaxrho*2+1)
+    drho_rs_M_LM = zeros(M+1, nspin, lmaxrho+1, lmaxrho*2+1)
+
     rho_gal_R2_LM = zeros(N-1, nspin, lmaxrho+1, lmaxrho*2+1)
+    
     rho_gal_dR_LM = zeros(N-1, nspin, lmaxrho+1, lmaxrho*2+1)
 
     rho_gal_mulipole_LM = zeros(N-1, nspin, lmaxrho+1, lmaxrho*2+1)
 
-    drho_gal_R2_LM = zeros(N-1, nspin, lmaxrho+1, lmaxrho*2+1)
-    drho_rs_M_LM = zeros(M+1, nspin, lmaxrho+1, lmaxrho*2+1)
+    
+
 
     
     for lr = 0:lmaxrho
@@ -487,6 +499,9 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
                     gcoef = real_gaunt_dict[(lr,mr,l,m,l,m)]
                     for spin = 1:nspin
                         rho_rs_M_R2_LM[:,spin, lr+1,mr+lr+1] += gcoef * rho_rs_M_R2_LM2[:,spin, l+1, m+1+l]
+                        if true
+                            drho_rs_M_R2_LM[:,spin, lr+1,mr+lr+1] += gcoef * drho_rs_M_R2_LM2[:,spin, l+1, m+1+l]
+                        end
                     end
                 end
             end
@@ -495,7 +510,8 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
 
     
     rho_rs_M_R2_LM = rho_rs_M_R2_LM * sqrt(4 * pi)
-
+    drho_rs_M_R2_LM = drho_rs_M_R2_LM * sqrt(4 * pi)
+    
 
     for spin = 1:nspin
         for lr = 0:lmaxrho
@@ -526,26 +542,29 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
 #                    for m = -l:l
 #                        println("before")
 #                        println("size(rho_rs_M_R2_LM[:,spin, lr+1, mr+lr+1] ", size(rho_rs_M_R2_LM[:,spin, lr+1, mr+lr+1]))
-                a,b,c,d =  get_rho_gal(rho_rs_M_R2_LM[:,spin, lr+1, mr+lr+1], g,N=N, invS=invS, l = lr)
+                a,b,c,d,e =  get_rho_gal(rho_rs_M_R2_LM[:,spin, lr+1, mr+lr+1], g,N=N, invS=invS, l = lr, drho_rs_M_R2_LM=drho_rs_M_R2_LM)
 #                        println("size ret ", size(ret))
                 rho_gal_R2_LM[:,spin, lr+1, mr+lr+1] += a
                 rho_gal_dR_LM[:,spin, lr+1, mr+lr+1 ] += b
                 rho_rs_M_LM[:,spin, lr+1, mr+lr+1]  += c
                 rho_gal_mulipole_LM[:,spin, lr+1, mr+lr+1]  += d
-
-                drho_gal_R2_LM[:,spin, lr+1, mr+lr+1] += D1*a
+                if true
+                    drho_rs_M_LM[:,spin, lr+1, mr+lr+1]  += e
+                end
+                
+#                drho_gal_R2_LM[:,spin, lr+1, mr+lr+1] += D1*a
                 #                    end
 #                end
             end
         end
     end                    
-    for spin = 1:nspin
-        for lr = 0:lmaxrho
-            for mr = -lr:lr
-                drho_rs_M_LM[:,spin, lr+1, mr+lr+1] = gal_rep_to_rspace(drho_gal_R2_LM[:,spin, lr+1, mr+lr+1], g, M=M)
-            end
-        end
-    end
+    #for spin = 1:nspin
+    #    for lr = 0:lmaxrho
+    #        for mr = -lr:lr
+    #            drho_rs_M_LM[:,spin, lr+1, mr+lr+1] = gal_rep_to_rspace(drho_gal_R2_LM[:,spin, lr+1, mr+lr+1], g, M=M)
+    #        end
+    #    end
+    #end
     
 #    println("sum rho ", sum(abs.(rho_gal_mulipole_LM[:,1, 1,1])), " " , sum(abs.(rho_gal_mulipole_LM[:,2, 1,1])))
     
@@ -556,7 +575,9 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
     rho_gal_R2_LM = rho_gal_R2_LM / (g.b-g.a) * 2
     rho_gal_dR_LM = rho_gal_dR_LM / (g.b-g.a) * 2
     rho_rs_M_LM = rho_rs_M_LM  / (g.b-g.a) * 2
+    drho_rs_M_LM = drho_rs_M_LM  / (g.b-g.a) * 2
     rho_gal_mulipole_LM = rho_gal_mulipole_LM  / (g.b-g.a) * 2
+
     
 
 #    println("SIZE ", size(rho_gal_R2_LM), " " , size(rho_gal_mulipole_LM), " lmax rho ", lmaxrho)
@@ -597,7 +618,7 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
     x = 1.0
     #println("test gal_rep_to_rspace ", gal_rep_to_rspace(x, rho_gal_R2[:,1], g), " " , gal_rep_to_rspace(x, rho_gal_dR[:,1], g) * x)
     
-    return rho_gal_R2_LM, rho_gal_dR_LM, rho_rs_M_LM, MP, drho_gal_R2_LM, drho_rs_M_LM, drho_rs_M_R2_LM2
+    return rho_gal_R2_LM, rho_gal_dR_LM, rho_rs_M_LM, MP, drho_rs_M_LM
 
 end
 
@@ -938,10 +959,14 @@ function vhart(rhor2, D2, V_L, g, M, l, m, MP)
     
 end
 
-function vxc_LM(rho_rs_M, g, M, N, funlist, gga, nspin, lmax, lmaxrho, LEB)
+function vxc_LM(rho_rs_M, drho_rs_M, g, M, N, funlist, gga, nspin, lmax, lmaxrho, LEB, R, invS)
 
     #get vxc in r space
+
     rho = zeros(M+1, nspin)
+    drho_dr = zeros(M+1, nspin)
+    drho_tp = zeros(M+1, nspin,2)
+    ddrho_tp = zeros(M+1, nspin,2)    
 
     loopmax = min(lmax*2, lmaxrho)
     #loopmax=lmaxrho
@@ -963,13 +988,24 @@ function vxc_LM(rho_rs_M, g, M, N, funlist, gga, nspin, lmax, lmaxrho, LEB)
             for l = 0:loopmax
                 for m = -l:l
                     rho[:, spin] += rho_rs_M[:,spin, l+1, m+l+1] * LEB.Ylm[(l,m)][ntp]
+                    if gga
+                        drho_dr[:, spin] += drho_rs_M[:,spin, l+1, m+l+1] * LEB.Ylm[(l,m)][ntp]
+
+                        #angular deriv
+                        drho_tp[:, spin,1] += drho_rs_M[:,spin, l+1, m+l+1] * LEB.dYlm_theta[(l,m)][ntp]
+                        drho_tp[:, spin,2] += drho_rs_M[:,spin, l+1, m+l+1] * LEB.dYlm_phi[(l,m)][ntp]
+
+                        # 2nd angular derivs
+                        ddrho_tp[:, spin,1] += drho_rs_M[:,spin, l+1, m+l+1] * LEB.ddYlm_theta[(l,m)][ntp]
+                        ddrho_tp[:, spin,2] += drho_rs_M[:,spin, l+1, m+l+1] * LEB.ddYlm_phi[(l,m)][ntp]                                  
+                    end
                 end
             end
         end
 
 #        println("$ntp rho_rs_M ", rho[1:5,1]* sqrt(4*pi), " xxxxxxxxxxxxxxx")
         
-        VXC_tp[ntp, :,:] = vxc(rho * sqrt(4*pi) , g, M, N, funlist, gga, nspin)
+        VXC_tp[ntp, :,:] = vxc(rho * sqrt(4*pi) , drho_dr , g, M, N, funlist, gga, nspin, LEB.θ[ntp], R, invS)
 #        println("$ntp VXC_tp ", VXC_tp[ntp, 1:5,1])
     end
 
@@ -1021,21 +1057,27 @@ function vxc_LM(rho_rs_M, g, M, N, funlist, gga, nspin, lmax, lmaxrho, LEB)
 end
 
 
-function vxc(rho, g, M, N, funlist, gga, nspin)
+function vxc(rho,drho, g, M, N, funlist, gga, nspin, theta, R, invS)
 
 #    println("size rho $(size(rho)) vs ", nspin)
 
-    println("FUNLIST $funlist")
+#    println("FUNLIST $funlist")
+
+    ddrho = zeros(size(drho))
+    dvsigma = zeros(size(drho))
     
     VLDA = zeros(size(rho,1), nspin)
+    println("size R ", size(R))
+    DRHO = zeros(length(drho), 3)
+    DRHO[:,1] = drho[:,1]
     if nspin == 1
         if !ismissing(funlist) && funlist != :lda_internal
             #e,v = EXC( (@view rho[:,1), funlist, (@view drho[:,1,l,m,:]), (@view ddrho[:,1,l,m,:]), (@view dvsigma[:,1,l,m,:]), THETA[l], gga, r, D1)
             if gga
-                #e,v = EXC( (@view rho[:,1]/(4*pi)  ), funlist, (@view drho[:,1,l,m,:]), (@view ddrho[:,1,l,m,:]), (@view dvsigma[:,1,l,m,:]), missing, gga, r, D1)
+                e,v = EXC_gal( (rho[:,1]/(4*pi)  ), funlist, (sqrt(4*pi)*DRHO/(4*pi)), (ddrho[:,1]), (dvsigma[:,1]), theta, gga, R, g, invS, N, M)
             else
                 println("USE EXTERNAL LDA?")
-                e,v = EXC( (rho[:,1]/(4*pi)  ), funlist, missing, missing, missing, missing, gga, missing, missing)
+                e,v = EXC_gal( (rho[:,1]/(4*pi)  ), funlist, missing,       missing,       missing,    theta, gga, R,  g, invS, N, M)
             end
             VLDA[:,1] = v
         else
@@ -1043,6 +1085,7 @@ function vxc(rho, g, M, N, funlist, gga, nspin)
             VLDA[:,1] = v_LDA.(rho[:, 1]/ (4*pi))
         end
     elseif nspin == 2
+#=
         if !ismissing(funlist) && funlist != :lda_internal
             if gga
                 e,v = EXC_sp( ( rho[:,1:2] / (4*pi) ), funlist, (@view drho[:,1:2,:]), (@view ddrho[:,1:2,:]), (@view dvsigma[:,1:3,:]), THETA[l], gga, r, D1)
@@ -1054,6 +1097,7 @@ function vxc(rho, g, M, N, funlist, gga, nspin)
             tt =  v_LDA_sp.(rho[:, 1]/ (4*pi), rho[:, 2]/ (4*pi))
             VLDA[:,:] = reshape(vcat(tt...), nspin,M+1)'
         end
+=#
     end
 
     VLDA = VLDA * sqrt(4*pi)
@@ -1244,6 +1288,189 @@ function solve_big(V_C, V_L, VH_LM, VXC_LM, D2, S, nspin, lmax, lmaxrho, funlist
 end
 
 
+function EXC_gal(n, funlist, drho, ddrho, dvsigma, theta, gga, r, g, invS, N, M)
+
+#    println("EXC ", sum(abs.(drho)), " ", gga)
+    
+    v = zeros(length(n))
+    e = zeros(length(n))
+
+    if gga
+#        kf = (3*pi^2*n).^(1/3)
+#        sigma = ((drho./(2* kf .* n) ).^2)
+        #sigma = drho.^2
+
+        sigma = drho[:,1].^2 #* (4*pi)
+        #println("size(drho) $(size(drho))  size r $(size(r))")
+        #sigma[2:end] += r[2:end].^(-2) .* ( drho[2:end,2].^2 + sin(theta)^(-2)* drho[2:end,3].^2    )
+        #sigma[2:end] += r[2:end].^(-2) .* ( drho[2:end,2].^2 + sin(theta)^(-2)* drho[2:end,3].^2    )        
+
+    end
+
+    #    drho_s  = drho 
+    #sigma_s = drho[:,1].^2 + drho[:,2].^2 + drho[:,3].^2
+
+#    println(n[1:2], "sigma ", sigma[1:2])
+#
+#    println("size r ", size(r), " size drho ", size(drho), " size n ", size(n))
+#    println("r ", r[1:3], r[end-3:end])
+    for (c_fun,fun) in enumerate(funlist)
+#        println("c_fun $c_fun")
+        if gga
+#            println("size ", size(n), size(sigma))
+#            println("$fun ")
+#            println(typeof(n), " " , typeof(sigma))
+
+#            println("n $(n[1]) sigma $(sigma[1])")
+            ret = evaluate(fun, rho=collect(n), sigma=sigma )
+            vsigma = ret.vsigma[:] 
+#            println( " size vsigma ", size(vsigma))
+            vrho = ret.vrho
+
+            #arr = r.^2 .* drho[:,1] .* vsigma
+            arr =  r .* drho[:,1] .* vsigma #* sqrt(4*pi)
+            rep = get_gal_rep(arr, g, N=N)
+#            println("rep ", rep)
+#            println()
+
+#            rep1 = get_gal_rep( r[1:end] .* drho[1:end,1] , g, N=N)
+#            println("rep1 ", rep1)
+#            println()
+
+#            rep2 = get_gal_rep( r[1:end] .* vsigma[1:end], g, N=N)
+#            println("rep2 ", rep2)
+#            println()
+
+#            rep2 = get_gal_rep( r[2:end] .* vsigma[2:end], g, N=N)
+#            println("rep2 ", rep2)
+#            println()
+            
+            
+            #println("arr ", arr)
+            #=
+            println("start")
+            println()
+            println("sigma ", sigma)
+            println()
+            println("n ", n)
+            println()
+            println("rep , $rep")
+            println()
+            println("arr $arr")
+            println()
+            println("drho ", drho[2:end,1])
+            println()
+            println("vsigma ", vsigma[2:end,1])
+            println()
+            println("r ", r[2:end])
+            println()
+            println("vrho ")
+            println(vrho)
+            println()
+=#
+            my_deriv = gal_rep_to_rspace(rep, g, M=M, deriv=1)
+
+            #d0 = gal_rep_to_rspace(rep, g, M=M, deriv=0)
+            
+            #println("d0 ", d0- arr)
+            #println()
+            
+            #            println(" size(my_deriv) ", size(my_deriv), " size r[2:end] ", size(r[2:end]) , " size (v[2:end]) ", size(v[2:end]))
+            v[1:end] += (-2.0*r[1:end].^-1 .* my_deriv[1:end] + -2.0 *r[1:end].^-1 .* drho[1:end,1] .* vsigma[1:end]  )   #* sqrt(4*pi)
+
+#            println("ans ", (-2.0*r[1:end].^-1 .* my_deriv[1:end] + -2.0 *r[1:end].^-1 .* drho[1:end,1] .* vsigma[1:end]))
+#            println()
+#            println("r ", r)
+#            println()
+            #v += -2.0*r.^-2 .* my_deriv
+            
+            #println("ans ", -2.0*r[2:end].^-1 .* my_deriv[2:end] + -2.0 *r[2:end].^-1 .* drho[2:end,1] .* vsigma[2:end])
+            #println()
+            #println("myd ", my_deriv[2:end])
+            ##return r, n, drho, vsigma, -2.0*r[2:end].^-2 .* my_deriv[2:end], vrho, rep, arr
+           
+            #1
+#            v[2:end] += - 4.0 * r[2:end].^(-1) .*  ( ( vsigma[2:end] .* drho[2:end,1]))
+            #v += -2.0*calc_D((vsigma .* drho[:,1])  , n, D1, r)
+
+            #2
+            #v[2:end] +=  -2.0/sin(theta) * r[2:end].^(-2) .* (sin(theta) * dvsigma[2:end,2] .* drho[2:end, 2] + sin(theta) * vsigma[2:end] .* ddrho[2:end, 2] + cos(theta) * drho[2:end, 2] .* vsigma[2:end])
+
+            #3
+            #v[2:end] +=  -2.0/sin(theta)^2 * r[2:end].^(-2) .* ( dvsigma[2:end,3] .* drho[2:end, 3] + vsigma[2:end] .* ddrho[2:end, 3])
+
+            
+            #v += -2.0 /sin(theta) * vsigma .* (r.^(-1) .* ( cos(theta)  
+            
+        else
+            ret = evaluate(fun, rho=collect(n))
+            vrho = ret.vrho
+            
+        end            
+
+        v +=  vrho[:]
+#        println("vrho ", vrho[1:2])
+        
+        #        println(ret)
+        #        println("size r ", size(r), " vs ", size(ret.vsigma))
+
+#        v +=  ret.vrho[:] - 2 ./ r .* ret.vsigma[:] .* drho * 2  #- D1 * ( ret.vsigma[:]  ) 
+        
+        #        v +=  ret.vrho[:] - 2.0 * r.^(-2) .*  (D1 * (r.^2 .* ret.vsigma[:] .* drho))
+        #v +=  ret.vrho[:] - 4.0 * r.^(-1) .*  ret.vsigma[:] .* drho  + 2 * D1 * (ret.vsigma[:] .*  drho) 
+        #v +=  ret.vrho[:] - 4.0 * r.^(-1) .*  ret.vsigma[:] .* drho  - 2 * (D1*ret.vsigma').* (drho)
+
+        #        v +=  ret.vrho[:] - 2.0 * r.^(-2) .*  (D1 * (r.^2 .* ret.vsigma[:] .* drho))
+
+#        va[:,1] += drho
+#        va[:,2] += drho_s
+#        va[:,3] += n
+#        va[:,4] += n_s
+#        va[:,5] += ret.vsigma[:]
+#        va[:,6] += vsigma
+#        va[:,7] += ret.vrho[:]
+#        va[:,8] += vrho
+#        va[:,9] += -2*D1*(vsigma .* drho_s)
+#        va[:,10] += calc_D(-2.0*(vsigma .* drho_s)  , n, D1, r) 
+        
+#        va[:,1] += ret.vsigma[:]
+#        va[:,2] += drho
+#        va[:,3] += D1*(ret.vsigma[:] .* drho)
+#        va[:,4] += -4.0 * r.^(-1) .*  ( ( ret.vsigma[:] .* drho))
+#        va[:,5] += - 2.0 * r.^(-2) .*  D1*(r.^2 .* ret.vsigma[:] .* drho )
+#        va[:,6] += ret.vrho[:]
+#        va[:,7] += n
+#        va[:,8] += vsigma[:]
+#        va[:,9] += D1*(vsigma[:] .* drho)
+        #v +=  -2.0 * r.^(-1) .* ( D1*( ret.vsigma[:] .* drho))
+
+        #v += (D1*ret.vsigma[:]) ./ r
+
+        #v += - 2.0 * r.^(-2) .*  (D1*(r.^2)) .* ret.vsigma[:] .* drho
+        #v += - 2.0 * r.^(-2) .*  r.^2 .* D1*(ret.vsigma[:] .* drho )
+        
+        #v += - 2.0 * r.^(-2) .*  D1*(r.^2 .* ret.vsigma[:] .* drho )
+        #v += - 2.0 * r.^(-2) .*  (D1*(r.^2)) .* ret.vsigma[:] .* drho 
+        #v += - 2.0 * r.^(-2) .*  r.^2 .* (D1*(ret.vsigma[:])) .* drho 
+        #v += - 2.0 .* ret.vsigma[:] .* (D1*(drho ) )
+        #v += - 2.0 * r.^(-2) .*  (D1*(r.^2 .* drho)) .* ret.vsigma[:] 
+
+        
+        #v += - 2.0 * r.^(-2) .*  D1*(r.^2 .* ret.vsigma[:])   .* drho
+
+        #        v += - 2.0 * ( D1*ret.vsigma[:]) .* drho
+#        v += - 2.0 * ret.vsigma[:] .* (D1*drho)
+
+        
+        #v += ret.vsigma[:]  
+        e += ret.zk[:]
+    end
+    
+    return 2.0*e,v
+    
+end
+
+
 function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters = 50, mix = 0.5, mixing_mode=:pulay, exc = missing, lmax = missing, conv_thr = 1e-7, lmaxrho = 0, mix_lm = false)
 
     if M == -1
@@ -1256,7 +1483,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     
     
     println("prepare")
-    Z, nel, filling, nspin, lmax, V_C, V_L, D1, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga, LEB = prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
+    Z, nel, filling, nspin, lmax, V_C, V_L, D1, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga, LEB, R = prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
 
 
     lm_dict = Dict()
@@ -1276,7 +1503,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     #println("vChebyshevDFT.Galerkin.do_1d_integral(VECTS[:,1,1,1], g) ", do_1d_integral(real.(VECTS[:,1,1,1,1]).^2, g))
     
 #    println("get rho")
-    rho_R2, rho_dR, rho_rs_M, MP, drho_gal_R2_LM, drho_rs_M_LM, drho_rs_M_R2_LM2 = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D1, D2)
+    rho_R2, rho_dR, rho_rs_M, MP, drho_rs_M_LM = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga)
     println("MP")
     println(MP)
 
@@ -1302,7 +1529,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
 
         if funlist != :hydrogen
             VH_LM = vhart_LM( sum(rho_dR, dims=2), D2, g, N, M, lmaxrho, lmax, MP, V_L)
-            VXC_LM = vxc_LM( rho_rs_M, g, M, N, funlist, gga, nspin, lmax, lmaxrho, LEB)
+            VXC_LM = vxc_LM( rho_rs_M, drho_rs_M_LM, g, M, N, funlist, gga, nspin, lmax, lmaxrho, LEB, R, invS)
         else
             VH_LM = zeros(N-1,N-1,lmaxrho+1, lmaxrho*2+1)
             VXC_LM = zeros(N-1,N-1,nspin, lmaxrho+1, lmaxrho*2+1)
@@ -1329,7 +1556,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
         #        display_eigs(VALS, nspin, lmax)
         
         if mix_lm == false
-            rho_R2_new, rho_dR_new, rho_rs_M_new, MP_new, drho_gal_R2_LM,drho_rs_M_LM  = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D1, D2)
+            rho_R2_new, rho_dR_new, rho_rs_M_new, MP_new, drho_rs_M_LM = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga)
         else
             println("big")
             rho_R2_new, rho_dR_new, rho_rs_M_new, MP_new  = get_rho_big(VALS, VALS_BIG, VECTS_BIG, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2, lm_dict, dict_lm, big_code) 
@@ -1360,9 +1587,11 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     println()
 
 #    println("size rho_rs_M", size(rho_rs_M))
-    return VALS, VECTS, rho_R2, VH_LM , VXC_LM, drho_gal_R2_LM, drho_rs_M_LM, rho_rs_M, drho_rs_M_R2_LM2
+    return VALS, VECTS, rho_R2, VH_LM , VXC_LM, rho_rs_M, drho_rs_M_LM
     
 end #end dft
+
+
 
 
 end #end module

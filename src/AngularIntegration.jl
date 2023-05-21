@@ -3,7 +3,7 @@ module AngularIntegration
 using SphericalHarmonics
 using Lebedev
 using Base.Threads
-
+using ForwardDiff
 
 struct leb
 
@@ -19,6 +19,11 @@ struct leb
     w::Array{Float64,1}
     lmax::Int64
     Ylm::Dict{NTuple{2,Int64}, Vector{Float64}}
+
+    dYlm_theta::Dict{NTuple{2,Int64}, Vector{Float64}}
+    dYlm_phi::Dict{NTuple{2,Int64}, Vector{Float64}}
+    ddYlm_theta::Dict{NTuple{2,Int64}, Vector{Float64}}
+    ddYlm_phi::Dict{NTuple{2,Int64}, Vector{Float64}}
     
 end
 
@@ -44,7 +49,19 @@ function makeleb(n; lmax = 12 )
         ϕ = zeros(1)
         Ylm = Dict{NTuple{2,Int64}, Vector{Float64}}()
         Ylm[(0,0)] = [1/sqrt(4*pi)]
-        return leb(1,1,x,y,z,θ,ϕ,w, 0, Ylm)
+
+        dYlm_theta = Dict{NTuple{2,Int64}, Vector{Float64}}()
+        dYlm_phi = Dict{NTuple{2,Int64}, Vector{Float64}}()
+        
+        ddYlm_theta = Dict{NTuple{2,Int64}, Vector{Float64}}()
+        ddYlm_phi = Dict{NTuple{2,Int64}, Vector{Float64}}()
+
+        dYlm_theta[(0,0)] = [0.0]
+        dYlm_phi[(0,0)] = [0.0]
+        ddYlm_theta[(0,0)] = [0.0]
+        ddYlm_phi[(0,0)] = [0.0]
+        
+        return leb(1,1,x,y,z,θ,ϕ,w, 0, Ylm, dYlm_phi,ddYlm_theta, ddYlm_phi )
         
     end
 
@@ -59,11 +76,12 @@ function makeleb(n; lmax = 12 )
 
     x,y,z,w = Lebedev.lebedev_by_order(n)
     N = length(x)
-    println("order $n , length $N")
+    println("Lebedev integration order $n , length $N")
 
     θ, ϕ = get_tp(x,y,z)
 
-
+    #println("length tp ", length(θ), " ", length(ϕ))
+    
     ####
 
     
@@ -73,25 +91,103 @@ function makeleb(n; lmax = 12 )
 
     data = yfn.(θ, ϕ)
 
+    pp=0.0
+    tt=0.0
+
+    f_theta = tx->SphericalHarmonics.computeYlm(tx, pp, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())[:]
+    f_phi   = px->SphericalHarmonics.computeYlm(tt, px, lmax=lmax, SHType = SphericalHarmonics.RealHarmonics())[:]
+
+    function f_dtheta(ttx)
+        ForwardDiff.derivative(f_theta, ttx)
+    end
+    function f_dphi(ppx)
+        ForwardDiff.derivative(f_phi, ppx)
+    end
+
+    function f_ddtheta(ttx)
+        ForwardDiff.derivative(f_dtheta, ttx)
+    end
+    function f_ddphi(ppx)
+        ForwardDiff.derivative(f_dphi, ppx)
+    end
+
+    DP = []
+    DT = []
+
+    DDP = []
+    DDT = []
+    for (t,p) in zip(θ, ϕ)
+        pp=p
+        tt=t
+        
+        push!(DT, f_dtheta(tt))
+        push!(DDT, f_ddtheta(tt))
+
+        push!(DP, f_dphi(pp))
+        push!(DDP, f_ddphi(pp))
+        
+    end
+
+    data_theta = zeros(N)
+    
+#    println("t")
+#    println(typeof(data))
+#    println("size(data) ", size(data))
+    
     Ylm = Dict{NTuple{2,Int64}, Vector{Float64}}()
 
+#    f_dtheta = tt->ForwardDiff.gradient(t->yfn(t, ϕ), θ)
+#    data_dtheta
+    
+    #    f_ddtheta = ForwardDiff.derivative(tt->ForwardDiff.derivative(t->yfn(t, ϕ), tt), θ)
+#    f_dphi = ForwardDiff.derivative(p->yfn(θ, p), ϕ)
+#    f_ddphi = ForwardDiff.derivative(pp->ForwardDiff.derivative(p->yfn(θ, p), pp), ϕ)
+    
+                           
+    dYlm_theta = Dict{NTuple{2,Int64}, Vector{Float64}}()
+    dYlm_phi = Dict{NTuple{2,Int64}, Vector{Float64}}()
+
+    ddYlm_theta = Dict{NTuple{2,Int64}, Vector{Float64}}()
+    ddYlm_phi = Dict{NTuple{2,Int64}, Vector{Float64}}()
+
+    counter = 0
     for l1 = 0:lmax
         for m1 = -l1:l1
+            counter += 1
+            
             Ylm[(l1,m1)] = zeros(N)
+
+            dYlm_theta[(l1,m1)] = zeros(N)
+            ddYlm_theta[(l1,m1)] = zeros(N)           
+
+            dYlm_phi[(l1,m1)] = zeros(N)
+            ddYlm_phi[(l1,m1)] = zeros(N)           
             for nn = 1:N
                 Ylm[(l1,m1)][nn] = data[nn][(l1,m1)]
+
+                dYlm_theta[(l1,m1)][nn] = DT[nn][counter]
+                ddYlm_theta[(l1,m1)][nn] = DT[nn][counter]
+                dYlm_phi[(l1,m1)][nn] = DT[nn][counter]
+                ddYlm_theta[(l1,m1)][nn] = DT[nn][counter]
+                
+#                dYlm_theta[(l1,m1)][nn] = data_dtheta[nn][(l1,m1)]
+#                ddYlm_theta[(l1,m1)][nn] = data_ddtheta[nn][(l1,m1)]
+
+#                dYlm_phi[(l1,m1)][nn] = data_dphi[nn][(l1,m1)]
+#                ddYlm_phi[(l1,m1)][nn] = data_ddphi[nn][(l1,m1)]
+                
             end                
         end
     end
 
     ####
 
-    println("typeof ")
-    for (c,x) =enumerate( [n,N,x,y,z,θ,ϕ,w,lmax,Ylm])
-        println("$c typeof ", typeof(x))
-    end
+#    println("typeof ")
+#    for (c,x) =enumerate( [n,N,x,y,z,θ,ϕ,w,lmax,Ylm])
+#        println("$c typeof ", typeof(x))
+#    end
     
-    return leb(n,N,x,y,z,θ,ϕ,w,lmax,Ylm)
+    return leb(n,N,x,y,z,θ,ϕ,w,lmax,Ylm,dYlm_theta, dYlm_phi,ddYlm_theta, ddYlm_phi )
 
 end
 

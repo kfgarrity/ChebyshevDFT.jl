@@ -63,7 +63,7 @@ function makegal(N,a,b; α=0.0, M = -1)
     end
     dr = rrr->ForwardDiff.derivative(rr-> r.(X.(rr)), rrr)
 
-    pts, w, bvals, dbvals = setup_integral_mats_grid_new(N, M, r, invr, dr,  B)
+    pts, w, bvals, dbvals = setup_integral_mats_grid_new(N, M, r, invr, dr, R,  B)
     
     return gal(N,M,a,b,α,bvals,dbvals,pts,w,s,inv(s),d1,d2,r,invr,dr, R,X,B,dB)
 
@@ -92,6 +92,7 @@ end
 
 function get_gal_rep(f, g::gal; N=-1, M=-1, invS=missing)
 
+    println("frep")
     if M == -1
         M = g.M
     end
@@ -104,29 +105,39 @@ function get_gal_rep(f, g::gal; N=-1, M=-1, invS=missing)
 
     nr = f.(g.R.(g.pts[2:M+2,M])) .*g.w[2:M+2,M]
     
-    g_rep = zeros(typeof(nr[1]), g.N-1)
-    for i = 1:(g.N-1)
+    g_rep = zeros(typeof(nr[1]), N-1)
+    for i = 1:(N-1)
         g_rep[i] =   sum( (@view g.bvals[2:M+2,i,M]).*nr )
     end
+
+#    println(size(invS))
+#    println(size(g_rep))
     
     return invS*g_rep
 
 end
 
-function get_gal_rep(arr::Array{1}, g::gal; M=-1, invS=missing)
+function get_gal_rep(arr::Vector, g::gal; N=-1, invS=missing)
 
-    if M == -1
-        M = g.M
+    println("ggrep")
+    
+    if N == -1
+        N = g.N
     end
-    N = length(arr)
+
+    M = length(arr)-1
+    println("length(arr) $(length(arr)) , M $M")
+    
     if ismissing(invS)
-        invS = inv(gal.s[1:N, 1:N])
+        invS = inv(g.s[1:N-1, 1:N-1])
     end
+
+    println(size(g.w[2:M+2,M]))
     
     arrw = arr .* g.w[2:M+2,M]
     
-    g_rep = zeros(typeof(arr[1]), g.N-1)
-    for i = 1:(g.N-1)
+    g_rep = zeros(typeof(arr[1]), N-1)
+    for i = 1:(N-1)
         g_rep[i] =   sum((@view g.bvals[2:M+2,i,M]).*arrw )
     end
     
@@ -134,7 +145,15 @@ function get_gal_rep(arr::Array{1}, g::gal; M=-1, invS=missing)
 
 end
 
-function get_rho_gal(rho_rs_M_R2,g::gal; N=-1, invS=missing, l = 0, D1=missing)
+function get_r_grid(g::gal; M=-1)
+    if M == -1
+        M = g.M
+    end
+    return g.R.(g.pts[1:M+3,M])
+end
+
+
+function get_rho_gal(rho_rs_M_R2,g::gal; N=-1, invS=missing, l = 0, D1=missing, drho_rs_M_R2_LM=missing)
 
     if N == -1
         N = g.N
@@ -149,7 +168,12 @@ function get_rho_gal(rho_rs_M_R2,g::gal; N=-1, invS=missing, l = 0, D1=missing)
     nrR_dR = rho_rs_M_R2 .* g.w[2:M+2,M] ./ g.R.(g.pts[2:M+2,M])
 
     rho_rs_M = rho_rs_M_R2 ./ g.R.(g.pts[2:M+2,M]).^2
-
+    if !ismissing(drho_rs_M_R2_LM)
+        drho_rs_M = (drho_rs_M_R2_LM - 2.0*rho_rs_M_R2 ./ g.R.(g.pts[2:M+2,M])) ./ g.R.(g.pts[2:M+2,M]).^2
+    else
+        drho_rs_M = zeros(size(rho_rs_M))
+    end
+    
     rho_gal = zeros(Float64, N-1)
     rho_gal_dR = zeros(Float64, N-1)
     rho_gal_multipole = zeros(Float64, N-1)
@@ -164,7 +188,7 @@ function get_rho_gal(rho_rs_M_R2,g::gal; N=-1, invS=missing, l = 0, D1=missing)
 
     
     #    println("size invS ", size(invS), " rho_gal ", size(rho_gal), " ", size(rho_gal_dR))
-    return invS*rho_gal ,  rho_gal_dR, rho_rs_M, invS*rho_gal_multipole
+    return invS*rho_gal ,  rho_gal_dR, rho_rs_M, invS*rho_gal_multipole, drho_rs_M
     
 end
 
@@ -190,7 +214,8 @@ end
 
 
 function gal_rep_to_rspace(rep, g::gal; M = -1, deriv=0)
-    
+
+#    println("rep")
     if M == -1
         M = g.M
     end
@@ -205,6 +230,9 @@ function gal_rep_to_rspace(rep, g::gal; M = -1, deriv=0)
     elseif deriv == 1
         for c = 1:N
             f += g.dbvals[2:M+2,c,M]*rep[c]
+#            if c == 1
+#                println("c $c    $(g.dbvals[2,c,M])  $(rep[c])   $(g.dbvals[2,c,M]*rep[c]) ")
+#            end
         end
     else
         println("deriv must be 0 or 1 you said $deriv")
@@ -215,15 +243,18 @@ function gal_rep_to_rspace(rep, g::gal; M = -1, deriv=0)
 end
 
 
-function gal_rep_to_rspace(r::Number, rep, g::gal; deriv=0)
-
+function gal_rep_to_rspace(r::Number, rep, g::gal; deriv=0, N = -1)
+#    println("number")
     if r > g.b
         return 0.0
     elseif r < g.a
         return 0.0
     end
+
+    if N == -1
+        N = length(rep)
+    end
     
-    N = length(rep)
     f = zeros(typeof(rep[1]), size(r))
 
     f = zero(typeof(rep[1]))
@@ -235,7 +266,7 @@ function gal_rep_to_rspace(r::Number, rep, g::gal; deriv=0)
             f += g.B[c].(g.r.(g.X.(r)))*rep[c]
         end
     elseif deriv==1
-        println("1 one")
+#        println("1 one")
         cc=0
         for c = 1:N
 #            cc=c
@@ -245,6 +276,9 @@ function gal_rep_to_rspace(r::Number, rep, g::gal; deriv=0)
             #            println("c $c $(aaa(r))  $(g.dB[cc].(g.r.(g.X.(r))))")
             
             f += g.dB[c].(g.r.(g.X.(r)))*rep[c] * DR
+#            if c == 1
+ #               println("c $c  $r  $(g.X.(r)) $(g.r.(g.X.(r))) $(g.dB[c].(g.r.(g.X.(r)))) $(rep[c]) $(DR)   $(g.dB[c].(g.r.(g.X.(r)))* DR)    $(g.dB[c].(g.r.(g.X.(r)))*rep[c] * DR)")
+  #          end
         end
 #    elseif deriv==2
 #        for c = 1:N
@@ -309,7 +343,7 @@ function get_gal_rep_matrix(arr::Vector, g::gal; M = -1)
         M = g.M
     end
     N = length(arr)+1
-    println("N $N")
+#    println("N $N")
     INT = zeros(N-1, N-1)
 
 
@@ -484,7 +518,7 @@ function get_sd(r, B, α)
         return B[C1](r(x))*B1[C2](x)
     end
 
-    println("derivs")
+#    println("derivs")
     for c1 in 1:length(B)
         for (c2, b2) in enumerate(B)
             C1=c1
@@ -545,7 +579,7 @@ function setup_integrals(N)
 end
 
 
-function setup_integral_mats_grid_new(NN, Nmax, r, invr, dr, B)
+function setup_integral_mats_grid_new(NN, Nmax, r, invr, dr, R, B)
 
     #    println("setup")
     begin
@@ -583,7 +617,8 @@ function setup_integral_mats_grid_new(NN, Nmax, r, invr, dr, B)
 
         PTS[1:N+3,N] = invr.(pts)
 
-#        DR = dr.(pts)
+        DR = dr.(R.(invr.(pts)))
+        #g.R.(g.pts[2:M+2,M])
         
         W[1:N+3, N] = w .* dinvr.(pts)
 
@@ -593,8 +628,8 @@ function setup_integral_mats_grid_new(NN, Nmax, r, invr, dr, B)
         for nn = 1:(NN-1)
             nnX = nn
             Bvals[1:N+3, nn, N] = get.(Float64.(pts))
-            dBvals[1:N+3, nn, N] = dget.(Float64.(pts)) #.* DR
-
+            dBvals[1:N+3, nn, N] = dget.(Float64.(pts)) .* DR
+            
             #            ddBvals[1:N+3, nn, N] = ddget.(Float64.(pts))
         end
         
