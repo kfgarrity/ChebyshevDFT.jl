@@ -61,7 +61,7 @@ function makeleb(n; lmax = 12 )
         ddYlm_theta[(0,0)] = [0.0]
         ddYlm_phi[(0,0)] = [0.0]
         
-        return leb(1,1,x,y,z,θ,ϕ,w, 0, Ylm, dYlm_phi,ddYlm_theta, ddYlm_phi )
+        return leb(1,1,x,y,z,θ,ϕ,w, 0, Ylm, dYlm_theta, dYlm_phi, ddYlm_theta, ddYlm_phi )
         
     end
 

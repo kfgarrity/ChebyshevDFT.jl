@@ -92,7 +92,7 @@ end
 
 function get_gal_rep(f, g::gal; N=-1, M=-1, invS=missing)
 
-    println("frep")
+#    println("frep")
     if M == -1
         M = g.M
     end
@@ -119,20 +119,20 @@ end
 
 function get_gal_rep(arr::Vector, g::gal; N=-1, invS=missing)
 
-    println("ggrep")
+#    println("ggrep")
     
     if N == -1
         N = g.N
     end
 
     M = length(arr)-1
-    println("length(arr) $(length(arr)) , M $M")
+#    println("length(arr) $(length(arr)) , M $M")
     
     if ismissing(invS)
         invS = inv(g.s[1:N-1, 1:N-1])
     end
 
-    println(size(g.w[2:M+2,M]))
+#    println(size(g.w[2:M+2,M]))
     
     arrw = arr .* g.w[2:M+2,M]
     
