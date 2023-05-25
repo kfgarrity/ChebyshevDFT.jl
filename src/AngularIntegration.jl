@@ -5,6 +5,9 @@ using Lebedev
 using Base.Threads
 using ForwardDiff
 
+θ0 = 1e-5
+
+
 struct leb
 
     n::Int64
@@ -38,6 +41,7 @@ real_gaunt_dict = Dict{NTuple{6,Int64}, Float64}()
 function makeleb(n; lmax = 12 )
 
     println("makeleb")
+
     
     if n == 0 || n == 1 #special case
         
@@ -45,7 +49,8 @@ function makeleb(n; lmax = 12 )
         y = zeros(1)
         z = zeros(1)
         w = ones(1)
-        θ = zeros(1)
+        #θ = zeros(1)
+        θ = [θ0]
         ϕ = zeros(1)
         Ylm = Dict{NTuple{2,Int64}, Vector{Float64}}()
         Ylm[(0,0)] = [1/sqrt(4*pi)]
@@ -239,6 +244,15 @@ function get_tp(x,y,z)
             println("something broke ϕ else ")
             ϕ[i] = 0.0
         end
+
+
+        if abs(θ[i]) < 1e-12
+            θ[i] = θ0
+        end
+        if abs(θ[i] - pi) < 1e-12
+            θ[i] = pi - θ0
+        end
+
     end            
             
 
