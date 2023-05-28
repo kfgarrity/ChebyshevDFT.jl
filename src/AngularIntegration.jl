@@ -5,7 +5,7 @@ using Lebedev
 using Base.Threads
 using ForwardDiff
 
-θ0 = 1e-5
+θ0 = 0.0
 
 
 struct leb
@@ -27,6 +27,8 @@ struct leb
     dYlm_phi::Dict{NTuple{2,Int64}, Vector{Float64}}
     ddYlm_theta::Dict{NTuple{2,Int64}, Vector{Float64}}
     ddYlm_phi::Dict{NTuple{2,Int64}, Vector{Float64}}
+
+    dYlm_phi_sin::Dict{NTuple{2,Int64}, Vector{Float64}}
     
 end
 
@@ -61,12 +63,16 @@ function makeleb(n; lmax = 12 )
         ddYlm_theta = Dict{NTuple{2,Int64}, Vector{Float64}}()
         ddYlm_phi = Dict{NTuple{2,Int64}, Vector{Float64}}()
 
+        dYlm_phi_sin = Dict{NTuple{2,Int64}, Vector{Float64}}()
+
         dYlm_theta[(0,0)] = [0.0]
         dYlm_phi[(0,0)] = [0.0]
         ddYlm_theta[(0,0)] = [0.0]
         ddYlm_phi[(0,0)] = [0.0]
+
+        dYlm_phi_sin[(0,0)] = [0.0]
         
-        return leb(1,1,x,y,z,θ,ϕ,w, 0, Ylm, dYlm_theta, dYlm_phi, ddYlm_theta, ddYlm_phi )
+        return leb(1,1,x,y,z,θ,ϕ,w, 0, Ylm, dYlm_theta, dYlm_phi, ddYlm_theta, ddYlm_phi, dYlm_phi_sin )
         
     end
 
@@ -80,11 +86,12 @@ function makeleb(n; lmax = 12 )
     end
 
     x,y,z,w = Lebedev.lebedev_by_order(n)
-    N = length(x)
+
+    θ, ϕ, w = get_tp(x,y,z, w)
+
+    N = length(w)
     println("Lebedev integration order $n , length $N")
-
-    θ, ϕ = get_tp(x,y,z)
-
+    
     #println("length tp ", length(θ), " ", length(ϕ))
     
     ####
@@ -109,6 +116,10 @@ function makeleb(n; lmax = 12 )
         ForwardDiff.derivative(f_phi, ppx)
     end
 
+    function f_dphi_sin(ppx)
+        ForwardDiff.derivative(f_phi, ppx) / sin(tt)
+    end
+    
     function f_ddtheta(ttx)
         ForwardDiff.derivative(f_dtheta, ttx)
     end
@@ -116,20 +127,50 @@ function makeleb(n; lmax = 12 )
         ForwardDiff.derivative(f_dphi, ppx)
     end
 
+
+    
     DP = []
     DT = []
 
     DDP = []
     DDT = []
+
+    DP_sin = []
     for (t,p) in zip(θ, ϕ)
         pp=p
         tt=t
-        
+            
         push!(DT, f_dtheta(tt))
         push!(DDT, f_ddtheta(tt))
-
+        
         push!(DP, f_dphi(pp))
         push!(DDP, f_ddphi(pp))
+
+        
+        #this deals with issues related to dividing by sin(θ=0), which appears to diverge but can give finite nonzero answers in the limit at θ → 0 . This is important for gradients of things expanded in Ylm.
+        if abs(t) < 1e-10 || abs(t-pi) < 1e-10
+            if abs(t) < 1e-10
+                tt = 1e-12
+                temp = f_dphi(pp)/sin(tt)
+                for ii = 1:length(temp)
+                    if abs(temp[ii]) < 1e-6
+                        temp[ii] = 0.0
+                    end
+                end
+                push!(DP_sin, temp)
+            elseif abs(t) < pi
+                tt = pi + 1e-12
+                temp = f_dphi(pp)/sin(tt)
+                for ii = 1:length(temp)
+                    if abs(temp[ii]) < 1e-6
+                        temp[ii] = 0.0
+                    end
+                end
+                push!(DP_sin, f_dphi(pp)/sin(tt))
+            end
+        else    
+            push!(DP_sin, f_dphi(pp)/sin(tt))
+        end
         
     end
 
@@ -152,6 +193,8 @@ function makeleb(n; lmax = 12 )
     dYlm_theta = Dict{NTuple{2,Int64}, Vector{Float64}}()
     dYlm_phi = Dict{NTuple{2,Int64}, Vector{Float64}}()
 
+    dYlm_phi_sin = Dict{NTuple{2,Int64}, Vector{Float64}}()
+    
     ddYlm_theta = Dict{NTuple{2,Int64}, Vector{Float64}}()
     ddYlm_phi = Dict{NTuple{2,Int64}, Vector{Float64}}()
 
@@ -167,13 +210,19 @@ function makeleb(n; lmax = 12 )
 
             dYlm_phi[(l1,m1)] = zeros(N)
             ddYlm_phi[(l1,m1)] = zeros(N)           
+
+            dYlm_phi_sin[(l1,m1)] = zeros(N)           
             for nn = 1:N
                 Ylm[(l1,m1)][nn] = data[nn][(l1,m1)]
 
+                
                 dYlm_theta[(l1,m1)][nn] = DT[nn][counter]
-                ddYlm_theta[(l1,m1)][nn] = DT[nn][counter]
-                dYlm_phi[(l1,m1)][nn] = DT[nn][counter]
-                ddYlm_theta[(l1,m1)][nn] = DT[nn][counter]
+                ddYlm_theta[(l1,m1)][nn] = DDT[nn][counter]
+                dYlm_phi[(l1,m1)][nn] = DP[nn][counter]
+                ddYlm_phi[(l1,m1)][nn] = DDP[nn][counter]
+
+                dYlm_phi_sin[(l1,m1)][nn] = DP_sin[nn][counter]
+                
                 
 #                dYlm_theta[(l1,m1)][nn] = data_dtheta[nn][(l1,m1)]
 #                ddYlm_theta[(l1,m1)][nn] = data_ddtheta[nn][(l1,m1)]
@@ -192,7 +241,7 @@ function makeleb(n; lmax = 12 )
 #        println("$c typeof ", typeof(x))
 #    end
     
-    return leb(n,N,x,y,z,θ,ϕ,w,lmax,Ylm,dYlm_theta, dYlm_phi,ddYlm_theta, ddYlm_phi )
+    return leb(n,N,x,y,z,θ,ϕ,w,lmax,Ylm,dYlm_theta, dYlm_phi,ddYlm_theta, ddYlm_phi, dYlm_phi_sin)
 
 end
 
@@ -211,10 +260,10 @@ function integrate(f, n::Integer)
     
 end
 
-function get_tp(x,y,z)
+function get_tp(x,y,z,w)
 
-    θ = zeros(length(x))
-    ϕ  = zeros(length(x))    
+    θ = zeros(eltype(x), length(x))
+    ϕ  = zeros(eltype(x), length(x))    
     for i = 1:length(x)
 #        println([x[i],y[i],z[i]])
         if abs(z[i]) < 1e-12 && abs(x[i]^2 + y[i]^2) > 1e-12
@@ -246,21 +295,54 @@ function get_tp(x,y,z)
         end
 
 
-        if abs(θ[i]) < 1e-12
-            θ[i] = θ0
-        end
-        if abs(θ[i] - pi) < 1e-12
-            θ[i] = pi - θ0
-        end
+#        if abs(θ[i]) < 1e-12
+#            θ[i] = θ0
+#            ϕ[i] = 0.0
+#        end
+#        if abs(θ[i] - pi) < 1e-12
+#            θ[i] = pi - θ0
+#            ϕ[i] = pi/2
+#        end
 
     end            
-            
+
+    #this is supposed to fix issues with the north/south poles which have undefined phi
+    #it doesn't matter for integrals of Ylm, but integrals of the gradient of Ylm get weird because px and py have different gradients at θ=0 for ϕ=0 and ϕ=ϕ/2 even though those are the same point.
+    θ2 = eltype(x)[]
+    ϕ2 = eltype(x)[]
+    w2 = eltype(x)[]
+    for i = 1:length(x)
+        if abs(θ[i]) < 1e-12
+            push!(θ2, 0.0)
+            push!(ϕ2, 0.0)
+
+            push!(θ2, 0.0)
+            push!(ϕ2, pi/2)
+
+            push!(w2, w[i]/2)
+            push!(w2, w[i]/2)
+        elseif abs(θ[i] - pi) < 1e-12
+            push!(θ2, pi)
+            push!(ϕ2, 0.0)
+
+            push!(θ2, pi)
+            push!(ϕ2, pi/2)
+
+            push!(w2, w[i]/2)
+            push!(w2, w[i]/2)
+        else            
+            push!(θ2, θ[i])
+            push!(ϕ2, ϕ[i])
+            push!(w2, w[i])
+           
+        end
+    end
+    return θ2, ϕ2, w2
 
         
     
     #    ϕ = sign.(y).*acos.(x ./ sqrt.(x.^2 + y.^2))
 
-    return θ, ϕ
 
 end
 

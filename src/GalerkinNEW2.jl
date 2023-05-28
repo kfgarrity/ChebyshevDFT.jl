@@ -69,16 +69,29 @@ function makegal(N,a,b; α=0.0, M = -1)
 
 end
 
-function do_1d_integral(f, g::gal; M=-1)
+function do_1d_integral(f::Function, g::gal; M=-1)
+#    println("f")
     if M == -1
         M = g.M
     end
 
-    return sum( (@view g.w[2:M+2M]) .* f.(g.R.(@view g.pts[2:M+2,M]))) * (g.b - g.a) / 2.0
+    #    return sum( (@view g.w[2:M+2]) .* f.(g.R.(@view g.pts[2:M+2,M]))) * (g.b - g.a) / 2.0
+
+#    rep = get_gal_rep(f, g)
+#    return do_1d_integral(rep, g, M=M)
+
+
+    
+     return sum(f.(g.R.(g.pts[1:M+3, M])) .* g.w[1:M+3,M]) * (g.b - g.a) / 2.0
+#    return sum(f.(g.R.(g.pts[2:M+2, M])).*g.w[2:M+2,M])* (g.b - g.a) / 2.0 
+    
+    #return sum( (@view g.w[2:M+2]) .* f.(g.r.(g.X.(@view g.pts[2:M+2,M])))) * (g.b - g.a) / 2.0
+
 
 end
 
-function do_1d_integral(arr::Vector, g::gal, M=-1)
+function do_1d_integral(arr::Vector, g::gal; M=-1)
+#    println("arr")
     if M == -1
         M = g.M
     end
