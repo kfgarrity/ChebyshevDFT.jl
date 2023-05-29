@@ -5,7 +5,7 @@ using Base.Threads
 using LinearAlgebra
 using ForwardDiff
 using QuadGK
-
+using LoopVectorization
 struct gal
     
     N::Int64
@@ -119,10 +119,18 @@ function get_gal_rep(f, g::gal; N=-1, M=-1, invS=missing)
     nr = f.(g.R.(g.pts[2:M+2,M])) .*g.w[2:M+2,M]
     
     g_rep = zeros(typeof(nr[1]), N-1)
-    for i = 1:(N-1)
-        g_rep[i] =   sum( (@view g.bvals[2:M+2,i,M]).*nr )
-    end
 
+#    for i = 1:(N-1)
+#        g_rep[i] =   sum( (@view g.bvals[2:M+2,i,M]).*nr )
+#    end
+
+    @tturbo for i = 1:(N-1)
+        for mm = 2:M+2
+            g_rep[i] +=   g.bvals[mm,i,M] *nr[mm]
+        end
+    end
+    
+    
 #    println(size(invS))
 #    println(size(g_rep))
     
@@ -166,7 +174,7 @@ function get_r_grid(g::gal; M=-1)
 end
 
 
-function get_rho_gal(rho_rs_M_R2,g::gal; N=-1, invS=missing, l = 0, D1=missing, drho_rs_M_R2_LM=missing)
+function get_rho_gal(rho_rs_M_R2,g::gal; N=-1, invS=missing, l = 0, D1=missing, drho_rs_M_R2_LM=missing, gga=true)
 
     if N == -1
         N = g.N
@@ -237,16 +245,28 @@ function gal_rep_to_rspace(rep, g::gal; M = -1, deriv=0)
     f = zeros(typeof(rep[1]), M+1)
     
     if deriv == 0
+
+#        for c = 1:N
+#            f += g.bvals[2:M+2,c,M]*rep[c]
+#        end
+
         for c = 1:N
-            f += g.bvals[2:M+2,c,M]*rep[c]
+            for mm = 1:(M+1)
+                f[mm] += g.bvals[mm+1,c,M]*rep[c]
+            end
         end
+        
     elseif deriv == 1
+#        for c = 1:N
+#            f += g.dbvals[2:M+2,c,M]*rep[c]
+        #        end
         for c = 1:N
-            f += g.dbvals[2:M+2,c,M]*rep[c]
-#            if c == 1
-#                println("c $c    $(g.dbvals[2,c,M])  $(rep[c])   $(g.dbvals[2,c,M]*rep[c]) ")
-#            end
+            for mm = 1:(M)
+                f[mm] += g.dbvals[mm+1,c,M]*rep[c]
+            end
         end
+
+        
     else
         println("deriv must be 0 or 1 you said $deriv")
     end
@@ -304,7 +324,7 @@ function gal_rep_to_rspace(r::Number, rep, g::gal; deriv=0, N = -1)
     return f
 end
 
-function get_gal_rep_matrix_R(fn_R, g::gal; N = -1)
+function get_gal_rep_matrix_R(fn_R, g::gal, gbvals2; N = -1)
 
     if N == -1
         N = g.N
@@ -315,14 +335,24 @@ function get_gal_rep_matrix_R(fn_R, g::gal; N = -1)
     INT = zeros(N-1, N-1)
     f = fn_R .* (@view g.w[2:M+2,M])
     #    println("get_gal_rep_matrix_R loop fn_R")
-    @inbounds for n1 = 1:(N-1)
-        for n2 = n1:(N-1)
-            INT[n1, n2] = sum(  (@view g.bvals[2:M+2,n1,M]).*(@view g.bvals[2:M+2,n2,M]) .* f)
+
+#    @inbounds for n1 = 1:(N-1)
+#        for n2 = n1:(N-1)
+#            INT[n1, n2] = sum(  (@view g.bvals[2:M+2,n1,M]).*(@view g.bvals[2:M+2,n2,M]) .* f)
+#        end
+#    end
+
+    @tturbo for n1 = 1:(N-1)
+        for n2 = 1:(N-1)
+            for i = 1:(M+1)
+                INT[n1, n2] += gbvals2[i,n1,n2] * f[i]
+            end
         end
     end
 
-
-    return (INT+INT') - diagm(diag(INT))
+    
+    return 0.5*(INT + INT')
+    #return (INT+INT') - diagm(diag(INT))
 
 end
 
@@ -381,7 +411,7 @@ function get_gal_rep_matrix(arr::Vector, g::gal; M = -1)
 end
 
 
-function get_vh_mat(vh_tilde, g::gal, l, m, MP; M = -1)
+function get_vh_mat(vh_tilde, g::gal, l, m, MP, gbvals2; M = -1)
 
     if M == -1
         M = g.M
@@ -399,21 +429,35 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP; M = -1)
         vh_tilde_vec += g.bvals[2:M+2,n1,M] * vh_tilde[n1]
     end
     
-    #    f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ nel/g.b * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
-
-    #f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
-    #    l=0
-    #    m=0
     if l == 0
         f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
     else
         f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ 0.0*MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
     end        
-    @threads for n1 = 1:(N-1)
+#    n1=1
+    
+#    println("size f $(size(f)) size bvals $(size(g.bvals[2:M+2,n1,M]))")
+    
+#    @time @threads for n1 = 1:(N-1)
+#        for n2 = 1:(N-1)
+#            INT[n1, n2] = sum(  (@view g.bvals[2:M+2,n1,M]).*(@view g.bvals[2:M+2,n2,M]) .* f)
+#        end
+#    end
+
+ #   @time @threads for n1 = 1:(N-1)
+ #       for n2 = 1:(N-1)
+ #           INT[n1, n2] = sum(  (@view gbvals2[:,n1,n2]) .* f)
+ #       end
+ #   end
+
+    @tturbo for n1 = 1:(N-1)
         for n2 = 1:(N-1)
-            INT[n1, n2] = sum(  (@view g.bvals[2:M+2,n1,M]).*(@view g.bvals[2:M+2,n2,M]) .* f)
+            for i = 1:(M+1)
+                INT[n1, n2] += gbvals2[i,n1,n2] * f[i]
+            end
         end
     end
+
     
     return (INT+INT')/2.0
 
