@@ -233,6 +233,25 @@ function gal_rep_to_rspace(r, rep, g::gal; deriv=0)
     return f
 end
 
+function MAT_NM(g, N, M)
+
+    return g.bvals[2:M+1, 1:N-1 , M]
+
+end
+
+function MAT_MN(g, N, M)
+
+    g.bvals[2:M+2,1:N-1,M] .* repmat(g.w[2:M+2,M], N-1)
+
+end
+
+
+function get_S(g, N)
+    
+    g.s[1:N-1, 1:N-1]
+    
+end
+
 
 function gal_rep_to_rspace(rep, g::gal; M = -1, deriv=0)
 
@@ -429,12 +448,33 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP, gbvals2; M = -1)
         vh_tilde_vec += g.bvals[2:M+2,n1,M] * vh_tilde[n1]
     end
     
-    if l == 0
-        f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
+    if true
+        if l == 0
+            f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
+        else
+            f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ 0.0*MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
+        end        
     else
-        f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ 0.0*MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
-    end        
-#    n1=1
+        f = vh_tilde_vec #.* (@view g.w[2:M+2,M])
+    end
+
+    X = zeros(N-1,N-1,N-1)
+    for n1 = 1:(N-1)
+        for n2 = 1:(N-1)
+            for n3 = 1:(N-1)
+                X[n1, n2,n3] = sum(  (@view g.bvals[2:M+2,n1,M]).*(@view g.bvals[2:M+2,n2,M]) .* g.w[2:M+2,M] ./ g.R.(@view g.pts[2:M+2,M]) .*  g.bvals[2:M+2,n3,M])
+            end
+        end
+    end
+    println("size X ", size(X), " size vh ", size(vh_tilde))
+    INT2 = zeros(N-1, N-1)
+    for n1 = 1:(N-1)
+        for n2 = 1:(N-1)
+            INT2[n1,n2] = sum(X[n1,n2,:] .* vh_tilde)
+        end
+    end
+    
+    #    n1=1
     
 #    println("size f $(size(f)) size bvals $(size(g.bvals[2:M+2,n1,M]))")
     
@@ -459,7 +499,7 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP, gbvals2; M = -1)
     end
 
     
-    return (INT+INT')/2.0
+    return (INT+INT')/2.0, INT2, X
 
 end
 
