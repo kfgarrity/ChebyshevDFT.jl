@@ -6,6 +6,7 @@ using LinearAlgebra
 using ForwardDiff
 using QuadGK
 using LoopVectorization
+
 struct gal
     
     N::Int64
@@ -103,6 +104,8 @@ function do_1d_integral(arr::Vector, g::gal; M=-1)
     return ret * (g.b - g.a)/ 2.0
 end
 
+
+
 function get_gal_rep(f, g::gal; N=-1, M=-1, invS=missing)
 
 #    println("frep")
@@ -119,14 +122,14 @@ function get_gal_rep(f, g::gal; N=-1, M=-1, invS=missing)
     nr = f.(g.R.(g.pts[2:M+2,M])) .*g.w[2:M+2,M]
     
     g_rep = zeros(typeof(nr[1]), N-1)
-
+    
 #    for i = 1:(N-1)
 #        g_rep[i] =   sum( (@view g.bvals[2:M+2,i,M]).*nr )
 #    end
 
-    @tturbo for i = 1:(N-1)
+    @tturbo for i = 1:(N-1) 
         for mm = 2:M+2
-            g_rep[i] +=   g.bvals[mm,i,M] *nr[mm]
+            g_rep[i] +=   g.bvals[mm,i,M] *nr[mm-1]
         end
     end
     
@@ -233,22 +236,39 @@ function gal_rep_to_rspace(r, rep, g::gal; deriv=0)
     return f
 end
 
-function MAT_NM(g, N, M)
-
-    return g.bvals[2:M+1, 1:N-1 , M]
-
-end
-
-function MAT_MN(g, N, M)
-
-    g.bvals[2:M+2,1:N-1,M] .* repmat(g.w[2:M+2,M], N-1)
-
-end
-
-
-function get_S(g, N)
+function MAT_N2M(g; N=-1, M=-1)
+    if N == -1
+        N = g.N
+    end
+    if M == -1
+        M = g.M
+    end
     
-    g.s[1:N-1, 1:N-1]
+    return g.bvals[2:M+2, 1:N-1 , M]
+
+end
+
+function MAT_M2N(g; N=-1, M=-1)
+
+    if N == -1
+        N = g.N
+    end
+    if M == -1
+        M = g.M
+    end
+    S = get_S(g, N=N)
+    
+    return inv(S)* (g.bvals[2:M+2,1:N-1,M] .* repeat(g.w[2:M+2,M]', N-1 )')'
+
+end
+
+
+function get_S(g; N=-1)
+    if N == -1
+        N = g.N
+    end
+    
+    return g.s[1:N-1, 1:N-1]
     
 end
 
@@ -361,7 +381,7 @@ function get_gal_rep_matrix_R(fn_R, g::gal, gbvals2; N = -1)
 #        end
 #    end
 
-    @tturbo for n1 = 1:(N-1)
+    @tturbo for n1 = 1:(N-1) # 
         for n2 = 1:(N-1)
             for i = 1:(M+1)
                 INT[n1, n2] += gbvals2[i,n1,n2] * f[i]
@@ -455,7 +475,7 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP, gbvals2; M = -1)
             f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ 0.0*MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
         end        
     else
-        f = vh_tilde_vec #.* (@view g.w[2:M+2,M])
+        f = vh_tilde_vec .* g.w[2:M+2,M]
     end
 
     X = zeros(N-1,N-1,N-1)
@@ -490,7 +510,7 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP, gbvals2; M = -1)
  #       end
  #   end
 
-    @tturbo for n1 = 1:(N-1)
+    @tturbo for n1 = 1:(N-1) #
         for n2 = 1:(N-1)
             for i = 1:(M+1)
                 INT[n1, n2] += gbvals2[i,n1,n2] * f[i]

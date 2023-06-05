@@ -18,6 +18,10 @@ using ..Galerkin:gal_rep_to_rspace
 using ..Galerkin:get_vh_mat
 using ..Galerkin:do_1d_integral
 using ..Galerkin:get_r_grid
+
+using ..Galerkin:MAT_M2N
+using ..Galerkin:MAT_N2M
+    
 using Plots
 using LoopVectorization
 
@@ -473,6 +477,10 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
     S = inv(invS)
     rho_rs_M_R2_LM2 = zeros(M+1, nspin, lmax+1, 2*lmax+1)
     drho_rs_M_R2_LM2 = zeros(M+1, nspin, lmax+1, 2*lmax+1)
+
+    mat_n2m = MAT_N2M(g, N=N, M=M)
+    mat_m2n = MAT_M2N(g, N=N, M=M)
+    
     for spin = 1:nspin
         for l = 0:lmax
             for m = -l:l
@@ -483,8 +491,13 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
                         break
                     end
 #                    println("VECTS ", size(VECTS[:, n, spin, l+1,l+1+m]))
-                    t = gal_rep_to_rspace(VECTS[:, n, spin, l+1,l+1+m], g, M=M)
-                    println("ttttt ", t[1:3], " ts ", real((S*VECTS[:, n, spin, l+1,l+1+m]))[1:3])
+#                    t = gal_rep_to_rspace(VECTS[:, n, spin, l+1,l+1+m], g, M=M)
+#                    println("size ", size(VECTS))
+ #                   println("test ", t - mat_n2m * VECTS[:, n, spin, l+1,l+1+m])
+
+                    t = mat_n2m * VECTS[:, n, spin, l+1,l+1+m]
+                    
+#                    println("ttttt ", t[1:3], " ts ", real((S*VECTS[:, n, spin, l+1,l+1+m]))[1:3])
 #                    t2 = real(t.*conj(t))
 #                    rho_rs_M_R2[:,spin] += t2 * fillval
                     rho_rs_M_R2_LM2[:,spin, l+1, m+1+l] += real(t.*conj(t)) * fillval
@@ -645,6 +658,11 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
         end
     end
 
+    R = g.R.(g.pts[2:M+2,M])
+    t = mat_n2m*real(VECTS[:,1,1,1])
+    t_dR = mat_m2n*(t.^2 ./ R  )
+    println("sub ", S*t_dR ./ rho_gal_dR_LM[:,1,1,1])
+#    println("rho gal ", mat_m2n*(t.*^2) ./ rho_gal_R2_LM
 
     psipsi_r_M_LM = zeros(N-1, nspin, nmax, lmaxrho+1, lmaxrho*2+1, nmax, lmaxrho+1, lmaxrho*2+1) 
     if exx > 1e-12
@@ -1152,7 +1170,7 @@ end
 
 
 
-function vhart_LM(rho_dR, D2, g, N, M, lmaxrho, lmax, MP, V_L, gbvals2, S)
+function vhart_LM(rho_dR, D2, g, N, M, lmaxrho, lmax, MP, V_L, gbvals2, S, VECTS)
 
 
     #    println("size rho_dR ", size(rho_dR))
@@ -1161,24 +1179,36 @@ function vhart_LM(rho_dR, D2, g, N, M, lmaxrho, lmax, MP, V_L, gbvals2, S)
     #loopmax = lmaxrho
     VH_LM = zeros(N-1, N-1, lmaxrho+1, 2*lmaxrho+1)
     #    println("size VH_LM ", size(VH_LM))
-    
+
+    mat_n2m = MAT_N2M(g, N=N, M=M)
+    mat_m2n = MAT_M2N(g, N=N, M=M)
+
+
+    R = g.R.(g.pts[2:M+2,M])
     for l = 0:loopmax
         for m = -l:l
             #            println("vhart $l $m ")
-            VH_LM[:, :, l+1, m+l+1], vh_mat2, vt, X = vhart(rho_dR[:,1,l+1, m+l+1], D2, V_L, g, M, l, m, 0.0*0.5*MP, gbvals2)
+            VH_LM[:, :, l+1, m+l+1], vh_mat2, vt, X = vhart(rho_dR[:,1,l+1, m+l+1], D2, V_L, g, M, l, m, 0.0*MP, gbvals2)
+
+            
             a = diagm(vt)
             b = S*diagm(vt)
             c = diagm(vt)*S
             d = (D2*S) \ rho_dR[:,1,l+1, m+l+1]
             e = (D2) \ (S*rho_dR[:,1,l+1, m+l+1])
             f = inv(D2) * (diagm(rho_dR[:,1,l+1, m+l+1]))
-            g = inv(D2) * (S*diagm(rho_dR[:,1,l+1, m+l+1]))
+            gx = inv(D2) * (S*diagm(rho_dR[:,1,l+1, m+l+1]))
             h = S^0.5*diagm(vt)*S^0.5
 
             #diagmat = diagm(rho_dR[:,1,l+1, m+l+1].^0.5)
             ex = zeros(N-1, N-1)
+            ex2 = zeros(N-1, N-1)
+            ex3 = zeros(N-1, N-1)
             invD = D2^-1
-            for ii = 1:N-1
+
+            
+            
+            @time for ii = 1:N-1
                 for jj = 1:N-1
                     for bb = 1:N-1
                         for cc = 1:N-1                        
@@ -1187,10 +1217,94 @@ function vhart_LM(rho_dR, D2, g, N, M, lmaxrho, lmax, MP, V_L, gbvals2, S)
                     end
                 end
             end
+
+            R = g.R.(g.pts[2:M+2,M])
+            t = mat_n2m*real(VECTS[:,1,1,1]) ./ R.^0.5
+            t_dR = t  
+            di = diagm(t_dR)
+                  
+#=            @time for ii = 1:2
+                for jj = 1:2
+                    for bb = 1:N-1
+                        for cc = 1:N-1
+                            for dd = 1:N-1
+                                for ee = 1:M+1
+                                    for ff = 1:M+1
+                                        ex2[ii,jj] += X[ii,jj,bb]*invD[bb,cc]*S[cc,dd]*mat_m2n[dd,ee]*di[ee,ff]*t_dR[ff]
+                                    end
+                                end
+                            end
+                        end                            
+                    end
+                end
+            end
+=#
+            temp = invD*S*mat_m2n*di*t_dR
+            temp2 = zeros(N-1)
+            for bb = 1:N-1
+                for cc = 1:N-1
+                    for dd = 1:N-1
+                        for ee = 1:M+1
+                            for ff = 1:M+1                        
+                                temp2[bb] += invD[bb,cc]*S[cc,dd]*mat_m2n[dd,ee]*di[ee,ff]*t_dR[ff]
+                            end
+                        end
+                    end
+                end                            
+            end
+
+
+            vx1_temp = di *  mat_m2n' * S* invD * S*  mat_m2n * di 
+            vx1 =  mat_n2m' * vx1_temp * mat_n2m
+
+            vx1a = zeros(N-1, N-1)
+            for i = 1:N-1
+                for j = 1:N-1
+                    for m1 = 1:M+1
+                        for m2 = 1:M+1
+                            vx1a[i,j] += vx1_temp[m1, m2] * g.bvals[m1+1,i,M] * g.bvals[m2+1,j,M] * g.w[m1+1,M] * g.w[m2+1,M]
+                        end
+                    end
+                end
+            end
+
+#            vx2_temp = t_dR'  *  mat_m2n' * S* invD * S*  mat_m2n * di
+            vx2_temp =  invD * S *mat_m2n*di*t_dR
+            vx2 =  zeros(N-1,N-1)
+
+            @time for ii = 1:2
+                for jj = 1:2
+                    for bb = 1:N-1
+#                        println("$ii $jj $bb")
+                        vx2[ii,jj] += X[ii,jj,bb]*vx2_temp[bb]
+                    end
+                end
+            end
+
             
+            
+            
+            
+            println("size vx1_temp ", size(vx1_temp), " sub ", sum(abs.(vx1_temp - vx1_temp')))
+            
+            println("size vx1 ", size(vx1), " sub ", sum(abs.(vx1 - vx1')))
+            println("size vx1a ", size(vx1), " sub ", sum(abs.(vx1a - vx1a')))
+
+            
+            
+            println("temp check ", temp - temp2)
+            println("size temp ", size(temp), " X " , size(X), " ex3 ", size(ex3), " mat_m2n ", size(mat_m2n), " S ", size(S), " invD ", size(invD), " di ", size(di))
+            @time for ii = 1:2
+                for jj = 1:2
+                    for bb = 1:N-1
+#                        println("$ii $jj $bb")
+                        ex3[ii,jj] += X[ii,jj,bb]*temp[bb]
+                    end
+                end
+            end
             println("zero ", VH_LM[:, :, l+1, m+l+1][1:2], " a ", a[1:2], " b ", b[1:2])
 #            println([c[1:2], d[1:2], e[1:2], f[1:2], g[1:2]])
-            for aa in [a[1:2], b[1:2], c[1:2], d[1:2], e[1:2], f[1:2], g[1:2], h[1:2], vh_mat2[1:2], ex[1:2]]
+            for aa in [a[1:2], b[1:2], c[1:2], d[1:2], e[1:2], f[1:2], gx[1:2], h[1:2], vh_mat2[1:2], ex[1:2], ex2[1:2] ,ex3[1:2], vx1[1:2], vx1a[1:2], vx2[1:2]]
                 println(aa ./  VH_LM[:, :, l+1, m+l+1][1:2])
             end
             println("sym ", sum(abs.(vh_mat2 - vh_mat2')))
@@ -1210,9 +1324,10 @@ function vhart(rhor2, D2, V_L, g, M, l, m, MP, gbvals2)
 
     vh_tilde_copy = deepcopy(vh_tilde)
 
+    println("size vh_tilde ", size(vh_tilde))
     vh_mat, vh_mat2, X = get_vh_mat(vh_tilde, g, l, m, MP, gbvals2, M=M)
     
-    println("$l $m size D2 ", size(D2), " size(V_L) " , size(V_L), " size(rhor2) ", size(rhor2), " size vh_mat ", size(vh_mat), " size vh_tilde", size(vh_tilde))
+#    println("$l $m size D2 ", size(D2), " size(V_L) " , size(V_L), " size(rhor2) ", size(rhor2), " size vh_mat ", size(vh_mat), " size vh_tilde", size(vh_tilde))
     return vh_mat, vh_mat2,vh_tilde_copy, X
     
 end
@@ -1871,7 +1986,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
 
 
         if funlist != :hydrogen
-            VH_LM = vhart_LM( sum(rho_dR, dims=2), D2, g, N, M, lmaxrho, lmax, MP, V_L,gbvals2, S)
+            VH_LM = vhart_LM( sum(rho_dR, dims=2), D2, g, N, M, lmaxrho, lmax, MP, V_L,gbvals2, S, VECTS)
         else
             VH_LM = zeros(N-1,N-1,lmaxrho+1, lmaxrho*2+1)
         end

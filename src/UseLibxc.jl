@@ -40,12 +40,12 @@ function EXC_sp(n, funlist, drho, ddrho, dvsigma, theta, gga,  r, D1)
 
     
     if gga
-#        sigma = zeros(length(n[:,1]), 3)
-#        sigma[:,1] = drho[:,1].^2
-#        sigma[:,3] = drho[:,2].^2
+        #        sigma = zeros(length(n[:,1]), 3)
+        #        sigma[:,1] = drho[:,1].^2
+        #        sigma[:,3] = drho[:,2].^2
         #        sigma[:,2] = drho[:,1] .* drho[:,2]
         sigma = zeros(3,length(drho[:,1,1]))
-        
+
         sigma[1,:] = drho[:,1,1].^2
         sigma[3,:] = drho[:,2,1].^2
         sigma[2,:] = drho[:,1,1].*drho[:,2,1]
@@ -67,6 +67,7 @@ function EXC_sp(n, funlist, drho, ddrho, dvsigma, theta, gga,  r, D1)
 
         if gga
             vsigma = ret.vsigma' 
+
             
             vrho = ret.vrho
 

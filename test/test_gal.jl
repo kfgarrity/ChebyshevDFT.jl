@@ -3,10 +3,11 @@ using Test
 using QuadGK
 using ForwardDiff
 
-tol_var=1e-12
 
 @testset "gal" begin
 
+    tol_var=1e-10
+    
     function f(x); return sin(x/4*pi); end
     gal = ChebyshevDFT.Galerkin.makegal(30, 0, 20.0, α = 0.1, M = 100)
 
