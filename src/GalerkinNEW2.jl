@@ -467,10 +467,13 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP, gbvals2; M = -1)
     for n1 = 1:N-1
         vh_tilde_vec += g.bvals[2:M+2,n1,M] * vh_tilde[n1]
     end
+
     
     if true
         if l == 0
             f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
+            
+            #f =  MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi)  .* (@view g.w[2:M+2,M])
         else
             f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ 0.0*MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
         end        
@@ -478,6 +481,8 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP, gbvals2; M = -1)
         f = vh_tilde_vec .* g.w[2:M+2,M]
     end
 
+    println("vh_tilde ", vh_tilde[1:3])
+    
     X = zeros(N-1,N-1,N-1)
     for n1 = 1:(N-1)
         for n2 = 1:(N-1)
@@ -486,7 +491,7 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP, gbvals2; M = -1)
             end
         end
     end
-    println("size X ", size(X), " size vh ", size(vh_tilde))
+#    println("size X ", size(X), " size vh ", size(vh_tilde))
     INT2 = zeros(N-1, N-1)
     for n1 = 1:(N-1)
         for n2 = 1:(N-1)
