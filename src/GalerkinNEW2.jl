@@ -481,23 +481,24 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP, gbvals2; M = -1)
         f = vh_tilde_vec .* g.w[2:M+2,M]
     end
 
-    println("vh_tilde ", vh_tilde[1:3])
+#    println("vh_tilde ", vh_tilde[1:3])
     
-    X = zeros(N-1,N-1,N-1)
-    for n1 = 1:(N-1)
-        for n2 = 1:(N-1)
-            for n3 = 1:(N-1)
-                X[n1, n2,n3] = sum(  (@view g.bvals[2:M+2,n1,M]).*(@view g.bvals[2:M+2,n2,M]) .* g.w[2:M+2,M] ./ g.R.(@view g.pts[2:M+2,M]) .*  g.bvals[2:M+2,n3,M])
-            end
-        end
-    end
+#    X = zeros(N-1,N-1,N-1)
+#    for n1 = 1:(N-1)
+ #       for n2 = 1:(N-1)
+#            for n3 = 1:(N-1)
+ #               X[n1, n2,n3] = sum(  (@view g.bvals[2:M+2,n1,M]).*(@view g.bvals[2:M+2,n2,M]) .* g.w[2:M+2,M] ./ g.R.(@view g.pts[2:M+2,M]) .*  g.bvals[2:M+2,n3,M])
+ #           end
+ #       end
+    #   end
+    
 #    println("size X ", size(X), " size vh ", size(vh_tilde))
-    INT2 = zeros(N-1, N-1)
-    for n1 = 1:(N-1)
-        for n2 = 1:(N-1)
-            INT2[n1,n2] = sum(X[n1,n2,:] .* vh_tilde)
-        end
-    end
+#    INT2 = zeros(N-1, N-1)
+#    for n1 = 1:(N-1)
+#        for n2 = 1:(N-1)
+#            INT2[n1,n2] = sum(X[n1,n2,:] .* vh_tilde)
+#        end
+#    end
     
     #    n1=1
     
@@ -524,7 +525,7 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP, gbvals2; M = -1)
     end
 
     
-    return (INT+INT')/2.0, INT2, X
+    return (INT+INT')/2.0 #, INT2, X
 
 end
 
