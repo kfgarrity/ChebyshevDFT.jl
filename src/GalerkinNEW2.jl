@@ -202,12 +202,16 @@ function get_rho_gal(rho_rs_M_R2,g::gal; N=-1, invS=missing, l = 0, D1=missing, 
     rho_gal_dR = zeros(Float64, N-1)
     rho_gal_multipole = zeros(Float64, N-1)
 
-    nrR_mp = rho_rs_M_R2 .* g.w[2:M+2,M] .* g.R.(g.pts[2:M+2,M]).^l
+    rho_gal_multipole2 = zeros(Float64, N-1)
+    
+    nrR_mp = rho_rs_M_R2 .* g.w[2:M+2,M] .* g.R.(g.pts[2:M+2,M]).^(l)
+#    nrR_mp2 = rho_rs_M_R2 .* g.w[2:M+2,M] .* g.R.(g.pts[2:M+2,M]).^(-l-1)
     
     for i = 1:N-1
         rho_gal[i] =   sum( (g.bvals[2:M+2,i,M]).*nrR )
         rho_gal_dR[i] =   sum( (g.bvals[2:M+2,i,M]).*nrR_dR )
         rho_gal_multipole[i] =   sum( (g.bvals[2:M+2,i,M]).*nrR_mp )
+#        rho_gal_multipole2[i] =   sum( (g.bvals[2:M+2,i,M]).*nrR_mp2 )
     end
 
     
@@ -471,11 +475,16 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP, gbvals2; M = -1)
     
     if true
         if l == 0
-            f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
+            f = (vh_tilde_vec  ./ g.R.(@view g.pts[2:M+2,M])  .+ MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
             
             #f =  MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi)  .* (@view g.w[2:M+2,M])
         else
-            f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ 0.0*MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
+
+            #            f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ (-1)^m  * MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
+            f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ g.R.(@view g.pts[2:M+2,M]) / g.b *  (-1)^m  * MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
+
+            #f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ 0.0*g.R.(@view g.pts[2:M+2,M]) / g.b *  (-1)^m  * MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
+
         end        
     else
         f = vh_tilde_vec .* g.w[2:M+2,M]
