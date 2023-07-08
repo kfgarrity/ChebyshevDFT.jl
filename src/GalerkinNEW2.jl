@@ -47,6 +47,7 @@ function makegal(N,a,b; α=0.0, M = -1)
         M = Int64(round(N*2.5))
     end
 
+    #r, invr = get_r(α, a, b)
     r, invr = get_r(α)
 
     
@@ -471,17 +472,24 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP, gbvals2; M = -1)
     for n1 = 1:N-1
         vh_tilde_vec += g.bvals[2:M+2,n1,M] * vh_tilde[n1]
     end
+    #if abs(MP[l+1, m+l+1]) > 1e-6
+    #    println("MP vh $l $m ", MP[l+1, m+l+1])
+    #end
 
-    
     if true
         if l == 0
-            f = (vh_tilde_vec  ./ g.R.(@view g.pts[2:M+2,M])  .+ MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
+            f = (vh_tilde_vec  ./ g.R.(@view g.pts[2:M+2,M]) .+ MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
             
             #f =  MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi)  .* (@view g.w[2:M+2,M])
         else
 
             #            f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ (-1)^m  * MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
-            f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ g.R.(@view g.pts[2:M+2,M]) / g.b *  (-1)^m  * MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
+
+            #            f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ g.R.(@view g.pts[2:M+2,M]) / g.b *   MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi) ) .* (@view g.w[2:M+2,M])
+
+            #f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+  0.0*g.R.(@view g.pts[2:M+2,M]) / g.b *  MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi) ) .* (@view g.w[2:M+2,M]) #
+
+            f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+  g.R.(@view g.pts[2:M+2,M]).^l / g.b^l *  MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi) ) .* (@view g.w[2:M+2,M]) #
 
             #f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ 0.0*g.R.(@view g.pts[2:M+2,M]) / g.b *  (-1)^m  * MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
 
@@ -534,7 +542,7 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP, gbvals2; M = -1)
     end
 
     
-    return (INT+INT')/2.0 #, INT2, X
+    return (INT+INT')/2.0, f ./ g.w[2:M+2,M]
 
 end
 
@@ -602,6 +610,22 @@ function get_r(α)
     
 end
 
+
+#=function get_r(L,a,b)
+    
+    t = 2*L/(b-a)
+    function invr(x)
+        L*(1+x)/(1-x+t) + a
+    end
+
+    function r(rr)
+        (rr-a - L + (rr-a)*t)/(rr-a+L)
+    end
+    
+    return r, invr
+    
+end
+=#
 
 
 function get_sd(r, B, α)
