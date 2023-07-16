@@ -74,7 +74,7 @@ function choose_exc(exc, nspin)
             exc = [:lda_x, :lda_c_vwn]
         end    
 
-        if (typeof(exc) == String && lowercase(exc) == "hydrogen") || (typeof(exc) == Symbol && exc == :hydrogen) || (typeof(exc) == String && lowercase(exc) == "H") || (typeof(exc) == Symbol && exc == :H)
+        if (typeof(exc) == String && lowercase(exc) == "hydrogen") || (typeof(exc) == Symbol && exc == :hydrogen) || (typeof(exc) == String && lowercase(exc) == "h") || (typeof(exc) == Symbol && (exc == :H || exc == :h))
             funlist = :hydrogen
             println("Running hydrogen-like atom (no hartree, no exc)")
             gga = false
@@ -222,7 +222,7 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
         #println(S)
         #vals, vects = eigen( invsqrtS*(D2 + VC[ll+1])*invsqrtS)
         
-        #        println("vals $ll $(vals[1:3])")
+        println("vals $ll $(vals[1:3])")
         for spin = 1:nspin
             for m = 1:(2*(ll)+1)
                 #                println("spin $spin ll $ll m $m , ", size(vects))
@@ -257,7 +257,8 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
                             for L = 0:lmax*2
                                 ta = 0;
                                 for MM = -L:L;
-                                    ta +=   4*pi/(2*L+1) * real_gaunt_dict[(L,MM,l,m,l1,m1)]*real_gaunt_dict[(L,MM,l,m,l2,m2)]                        end
+                                    ta +=   4*pi/(2*L+1) * real_gaunt_dict[(L,MM,l,m,l1,m1)]*real_gaunt_dict[(L,MM,l,m,l2,m2)]
+                                end
                                 hf_sym[l+1, m+l+1, l1+1, l1+m1+1, l2+1, l2+m2+1, L+1] = ta
                             end
                         end
@@ -279,7 +280,37 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
     for L = 0:lmax*2
         Linv = inv((D2 + L*(L+1)*V_L))  
         LINOP[L] = mat_m2n' * S* Linv *S  *  mat_m2n
-        R5[L] = mat_n2m'*diagm( (R/g.b).^(L/2 ) ) * mat_m2n'
+
+        println("typeof R ", typeof((R/g.b).^(L)))
+
+        function V_R(r)
+            return (r/g.b).^L
+        end
+
+        #V_C = get_gal_rep_matrix(V_c, g, ; N = N, M = M)
+
+
+        
+        MAT = get_gal_rep_matrix(V_R, g, N=N, M=M)
+
+
+
+        #        R5[L] = deepcopy(mat_m2n' *S*MAT*S*  mat_m2n)
+        R5[L] = MAT
+
+        #R5[L] = mat_m2n' * S* MAT  *S  *  mat_m2n
+
+        #@println("MAT $L ", sum(MAT), " size MAT ", size(MAT), " size R5 ", size(R5[L]) )        
+        
+        #R5[L] = mat_m2n' * MAT   *  mat_m2n
+        #R5[L] = mat_m2n' *  MAT   *  mat_m2n
+
+#        if L == 0
+#            println("R5[L] $L ", sum(abs.(R5[L] - S)))
+#        end
+        
+        #R5[L] = mat_n2m'*diagm( (R/g.b).^(L/2) ) * mat_m2n'
+        #R5[L] = mat_m2n*diagm( (R/g.b).^(L/2 ) ) * mat_n2m
     end
 
     
@@ -638,6 +669,9 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
                     gcoef = real_gaunt_dict[(lr,mr,l,m,l,m)]
                     for spin = 1:nspin
                         rho_rs_M_R2_LM[:,spin, lr+1,mr+lr+1] += gcoef * rho_rs_M_R2_LM2[:,spin, l+1, m+1+l]
+                        if sum(abs.(gcoef * rho_rs_M_R2_LM2[:,spin, l+1, m+1+l])) > 1e-8
+                            println("add rho spin $spin, lmr $lr $mr,  $l $m  ", gcoef, " sum ", sum(rho_rs_M_R2_LM2[:,spin, l+1, m+1+l]))
+                        end
                         if gga
                             drho_rs_M_R2_LM[:,spin, lr+1,mr+lr+1] += gcoef * drho_rs_M_R2_LM2[:,spin, l+1, m+1+l]
                         end
@@ -1802,7 +1836,7 @@ function vxx_LM5(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbv
 
     VX_LM2 .= 0.0
 
-    #MP_x = zeros(lmax*2*2+1)
+    MP_x = zeros(lmax*2+1)
 
     temp = zeros(N-1,N-1)
 
@@ -1811,8 +1845,43 @@ function vxx_LM5(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbv
     t = zeros(M+1)
     tf1 = zeros(M+1)
     mt = zeros(N-1, M+1)
+    #mt1 = zeros(N-1, M+1)
+    mt1 = zeros(N-1)
 
     #println("vxx")
+
+#    S5 = S^-0.5
+
+    for spin = 1:nspin
+        for l = 0:lmax #this is the sum over b
+            for m = -l:l
+                for n = 1:N-1 #this is the sum over b as well
+                    
+                    f = filling[n,spin,l+1,m+l+1]
+                    if f < 1e-20
+                        break
+                    end
+                    for l1 = 0:lmax #this is the sum over b
+                        for m1 = -l1:l1
+                            for n1 = 1:N-1 #this is the sum over b as well
+                                
+                                f1 = filling[n1,spin,l1+1,m1+l1+1]
+                                if f1 < 1e-20
+                                    break
+                                end
+                                for L = 0:lmax*2
+                                    println("test L $L,  $n $l $m , $n1 $l1 $m1 ", (VECTS[:,n,spin, l+1, m+l+1]'*R5[L]*VECTS[:,n1,spin,l1+1, m1+l1+1]))
+                                end
+                                println()
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+                                    
     
     for spin = 1:nspin
         for l = 0:lmax #this is the sum over b
@@ -1826,50 +1895,67 @@ function vxx_LM5(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbv
                     t .= real(mat_n2m*(@view VECTS[:,n,spin,l+1, m+l+1]))
                     tf1 .=  t ./ R  / sqrt(g.b-g.a) * sqrt(2 )
                     mt .= mat_n2m'*diagm(tf1)
-#                    MP_x .= 0.0                    
-#                    for L = 0:lmax*2
-#                        MP_x[L+1] = f * sum( ( t.*conj(t) .*R.^L .* g.w[2:M+2,M])) / (2*L +1)
-#                    end
-
-                    MAT .= S* (@view VECTS[:,n,spin,l+1, m+l+1])* (@view VECTS[:,n,spin,l+1, m+l+1])'*S'
+#                    mt1 .= mat_n2m'*diagm(t) / sqrt(g.b-g.a) * sqrt(2 )
+                    MP_x .= 0.0
+                    #MP_x[1] = nspin
+                    #   for L = 0:0
                     
+                    for L = 0:lmax*2
+                    
+                        MP_x[L+1] = f * sum( ( t.*conj(t) .*R.^L .* g.w[2:M+2,M])) / (2*L +1)
+                    end
+
+
+#                    MAT .= S* (@view VECTS[:,n,spin,l+1, m+l+1])* (@view VECTS[:,n,spin,l+1, m+l+1])'*S'
+#                    MAT .= S* (@view VECTS[:,n,spin,l+1, m+l+1])* (@view VECTS[:,n,spin,l+1, m+l+1])'*S'                    
+
                     for L =  0:lmax*2
-#
-#                        tz = 0.0
-#                        for M = -L:L
-#                            tz += real_gaunt_dict[(L,M,l,m,l,m)]
-#                        end
-                        #if L == 0
-                        MP_x = f * sum( ( t.*conj(t) .*R.^L .* g.w[2:M+2,M])) / (2*L +1)  #* tz * sqrt(4*pi)
-                        #else
-                        #    MP_x = 0.0
-                        #end
-                            
-                        #                        if abs(MP_x) > 1e-5
-                        #                            println("MP_x $l $m  $L ", MP_x)
-                        #                        end
-                            
-                        MATL .= R5[L]*MAT*R5[L]' * (MP_x / g.b^(L+1) * sqrt(pi)/(2*pi)  *(2*L+1) * sqrt(4*pi))
-                        
+
+#                        MP_x = f * sum( ( t.*conj(t) .*R.^L .* g.w[2:M+2,M])) / (2*L +1)  #* factor
+
                         temp .=  mt * LINOP[L] * mt' *( (2*L+1)*f/2.0 ) #+ MATL 
 
+#                        println("test s$spin   $l $m $n, $L ", MP_x * (2*L+1)/f / g.b^L, " ", (t'*diagm(R.^L .* g.w[2:M+2,M])*t/g.b^L ), " ", (VECTS[:,n,spin, l+1, m+l+1]'*R5[L]*VECTS[:,n,spin,l+1, m+l+1]))
                         
-                        @threads for l1 = 0:lmax
+                        #                        MATL .= (VECTS[:,n,spin, l+1, m+l+1]'*R5[L]*VECTS[:,n,spin,l+1, m+l+1]) * S*VECTS[:,n,spin,l+1, m+l+1]*(S*VECTS[:,n,spin,l+1, m+l+1])'    *(  MP_x / g.b^(L+1) * sqrt(pi)/(2*pi)  *(2*L+1) * sqrt(4*pi)  )
+
+                        #MATL .= (VECTS[:,n,spin, l+1, m+l+1]'*R5[L]*VECTS[:,n,spin,l+1, m+l+1]) * S*VECTS[:,n,spin,l+1, m+l+1]*(S*VECTS[:,n,spin,l+1, m+l+1])'    *(  MP_x[L+1] / g.b^(L+1) * sqrt(pi)/(2*pi)  *(2*L+1) * sqrt(4*pi)  )
+
+                        #MATL .= (VECTS[:,n,spin, l+1, m+l+1]'*R5[L]*VECTS[:,n,spin,l+1, m+l+1]) * S*VECTS[:,n,spin,l+1, m+l+1]*(S*VECTS[:,n,spin,l+1, m+l+1])'    *(  MP_x / g.b^(L+1) * sqrt(pi)/(2*pi)  *(2*L+1) * sqrt(4*pi)  )                        
+
+                        MATL .=  real(S*VECTS[:,n,spin,l+1, m+l+1]*(S*VECTS[:,n,spin,l+1, m+l+1])')    *(  MP_x[L+1]^2 *(2*L+1)/f/g.b^L / g.b^(L+1) * sqrt(pi)/(2*pi)  *(2*L+1) * sqrt(4*pi)  ) 
+
+                        #MATL .=  diagm(S*VECTS[:,n,spin,l+1, m+l+1])*R5[L]*diagm(S*VECTS[:,n,spin,l+1, m+l+1])    *(  MP_x[L+1]  / g.b^(L+1) * sqrt(pi)/(2*pi)  *(2*L+1) * sqrt(4*pi)  ) 
+
+                        #println("go spin $spin,  $n, $l $m, L $L ", sum(abs.(MATL)))
+
+                        #MATL .=  real(S*VECTS[:,n,spin,l+1, m+l+1]*(S*VECTS[:,n,spin,l+1, m+l+1])')    *(  MP_x[L+1]^2 *(2*L+1)^1/(2*L+1)/f/g.b^L / g.b^(L+1) * sqrt(pi)/(2*pi)  *(2*L+1) * sqrt(4*pi)  )
+                        
+                        #MATL .= (t'*diagm(R.^L .* g.w[2:M+2,M])*t/g.b^L ) * S*VECTS[:,n,spin,l+1, m+l+1]*(S*VECTS[:,n,spin,l+1, m+l+1])'    *(  MP_x / g.b^(L+1) * sqrt(pi)/(2*pi)  *(2*L+1) * sqrt(4*pi)  )
+
+                        
+                        #MATL .=  S*VECTS[:,n,spin,l+1, m+l+1]*(S*VECTS[:,n,spin,l+1, m+l+1])'    *(  MP_x / g.b^(L+1) * sqrt(pi)/(2*pi)  *(2*L+1) * sqrt(4*pi)  )        
+                        for l1 = 0:lmax
                             for m1 = -l1:l1
                                 for l2 = 0:lmax
-                                    @turbo for m2 = -l2:l2
+                                    for m2 = -l2:l2
                                         ta = hf_sym[l+1, l+m+1,l1+1,m1+l1+1,l2+1,m2+l2+1, L+1]
                                         for ii = 1:N-1
                                             for jj = 1:N-1
                                                 #                                                VX_LM2[ii,jj,spin,l1+1,m1+l1+1,l2+1,m2+l2+1] += -ta*(temp[ii,jj])
-                                                VX_LM2[ii,jj,spin,l1+1,m1+l1+1,l2+1,m2+l2+1] += -ta*temp[ii,jj] - ta*MATL[ii,jj]
-                                                
+                                                VX_LM2[ii,jj,spin,l1+1,m1+l1+1,l2+1,m2+l2+1] += -ta*temp[ii,jj] - ta*MATL[ii,jj] 
                                             end
                                         end
+                                        if l1 == l2 && m1 == m2
+                                            println("factor $l $m, $l1 $m1,  $l2 $m2  L  $L  ", (  MP_x[L+1] / g.b^(L+1) * sqrt(pi)/(2*pi)    ) ,  "  ta $ta  MP_x $(MP_x[L+1]) tot ", sum(abs.(ta*MATL)))
+                                        end
+                                        
                                     end
                                 end
                             end
                         end
+                        println()
+                        
                     end
                     
                 end
@@ -1888,7 +1974,7 @@ function vxx_LM5(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbv
                     for m2 = -l2:l2
                         t1 .= (@view VX_LM2[:,:,spin,l1+1,m1+l1+1,l2+1,m2+l2+1])
                         t2 .= (@view VX_LM2[:,:,spin,l2+1,m2+l2+1,l1+1,m1+l1+1])
-#                        println("t1t2 $l1 $m1 $l2 $m2 ", sum(abs.(t1 - t2)), " diff  " , sum(abs.(t1 - t2')), " tot ", sum(abs.(t1)))
+#                        println("t1t2 spin $spin,  $l1 $m1,  $l2 $m2    ", sum(abs.(t1 - t2)), "     diff     " , sum(abs.(t1 - t2')), "     tot      ", sum(abs.(t1)))
                         VX_LM2[:,:,spin,l1+1,m1+l1+1,l2+1,m2+l2+1] .= 0.5*(t1 + t2')
                         VX_LM2[:,:,spin,l2+1,m2+l2+1,l1+1,m1+l1+1] .= 0.5*(t1' + t2)
                     end
@@ -2465,9 +2551,9 @@ function solve_small(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho
                             VLM += gcoef * (4*pi*VH_LM[:,:,lr+1,lr+mr+1] + VXC_LM[:,:,spin,lr+1,lr+mr+1])  # + 0.0*4*pi*VX_LM[:,:,spin, lr+1,lr+mr+1])
                             #println("vh $lr $mr $l $m ", gcoef*4*pi*VH_LM[1:3,1,lr+1,lr+mr+1])
                             
-                            if sum(abs.(gcoef * (4*pi*VH_LM[:,:,lr+1,lr+mr+1]))) > 1e-10
-                                println("VH $l $m   $lr $mr  ", sum(abs.(gcoef * (4*pi*VH_LM[:,:,lr+1,lr+mr+1]))))
-                            end
+#                            if sum(abs.(gcoef * (4*pi*VH_LM[:,:,lr+1,lr+mr+1]))) > 1e-10
+#                                println("VH spin $spin ,  $l $m ,    $lr $mr  VH_mat $(VH_LM[:,:,lr+1,lr+mr+1])   gcoef  $gcoef  ---tot   ", sum(abs.(gcoef * (4*pi*VH_LM[:,:,lr+1,lr+mr+1]))))
+#                            end
                         end
                     end
 
@@ -2475,9 +2561,15 @@ function solve_small(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho
                     #                    VLM += 4*pi*VX_LM[:,:,spin, l+1,l+m+1, l+1,l+m+1]/(4*pi)
                     if exx > 1e-12
                         #VLM += 4*pi*VX_LM[:,:,spin, l+1,l+m+1]/(4*pi)
+                        VLM_old = deepcopy(VLM)
                         VLM += VX_LM[:,:,spin, l+1,l+m+1, l+1, l+m+1]
-                        #println("sum abs  XX $l $m  ", sum(abs.( VX_LM[:,:,spin, l+1,l+m+1, l+1, l+m+1])))
+#                        println("size VLM_old ", size(VLM_old ), " size VX ", size(VX_LM[:,:,spin, l+1,l+m+1, l+1, l+m+1]))
+#                        println("sum abs  XX $l $m  ", sum(abs.( VX_LM[:,:,spin, l+1,l+m+1, l+1, l+m+1])))
+#                        println("vh vx diff $l $m  ", sum(abs.(VX_LM[:,:,spin, l+1,l+m+1, l+1, l+m+1] - VLM_old)), " VH_tot $VLM_old VX $(VX_LM[:,:,spin, l+1,l+m+1, l+1, l+m+1]) ")
+                        #println("vh vx div ", VX_LM[1:2,1:2,spin, l+1,l+m+1, l+1, l+m+1] ./ (VLM_old[1:2,1:2] .+ 1e-20))
                     end
+
+
                     
                 end
                 
@@ -2802,6 +2894,28 @@ function EXC_gal( n, funlist, drho, ddrho_omega, vrho, vsigma, dvsigma_theta, dv
 
 end
 
+function get_t2(VECTS, mat_n2m, mat_m2n, N, M, nspin, lmax)
+
+    t2 = zeros(M+1, N-1, nspin, lmax+1, 2*lmax+1)
+    for spin = 1:nspin
+        for l = 0:lmax
+            for m = -l:l
+                for n = 1:N-1
+                    fillval = filling[n, spin, l+1, l+m+1]
+                    #                    println("add fillval $spin $l $m ", fillval)
+                    if fillval < 1e-20
+                        break
+                    end
+                    t = mat_n2m * VECTS[:, n, spin, l+1,l+1+m]
+                    t2[:,n,spin, l+1, l+m+1] = t*conj(t) * fillval
+                end
+            end
+        end
+    end
+    return t2
+
+end
+
 
 function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters = 50, mix = 0.5, mixing_mode=:pulay, exc = missing, lmax = missing, conv_thr = 1e-7, lmaxrho = 0, mix_lm = false, exx = 0.0, VECTS=missing)
 
@@ -2883,7 +2997,10 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
 
         println("iter $iter")
         @time if funlist != :hydrogen
-            
+
+            #MP_temp = MP[1]
+            #MP .= 0.0
+            #MP[1] = MP_temp
             VH_LM, VTILDE = vhart_LM( sum(rho_dR, dims=2), D2, g, N, M, lmaxrho, lmax, MP*ex_factor, V_L,gbvals2, S, VECTS) #ex_factor*
             
         else
@@ -2931,20 +3048,24 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
 
         
         begin 
-            rho_R2 = rho_R2_new * mix + rho_R2 *(1-mix)
-            rho_dR = rho_dR_new * mix + rho_dR * (1-mix)
-            rho_rs_M = rho_rs_M_new * mix + rho_rs_M * (1-mix)
+#            rho_R2 = rho_R2_new * mix + rho_R2 *(1-mix)
+#            rho_dR = rho_dR_new * mix + rho_dR * (1-mix)
+#            rho_rs_M = rho_rs_M_new * mix + rho_rs_M * (1-mix)
 
-            #            MP = MP_new*mix + MP*(1-mix) #this is approximation for higher multipoles.
+            #MP = MP_new*mix + MP*(1-mix) #this is approximation for higher multipoles.
             
+
+#            t2_new = get_t2(VECTS_new, mat_n2m, mat_m2n, N, M, nspin, lmax)
+            
+ #           t2 = t2*mix + t2_new * (1-mix)
             
             VECTS = VECTS*mix + VECTS_new*(1-mix)
 
 
             println("rho2")
-            @time rho_R2_new, rho_dR_new, rho_rs_M_new,  drho_rs_M_LM, MP = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga, exx, nmax)
+            @time rho_R2, rho_dR, rho_rs_M,  drho_rs_M_LM, MP = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga, exx, nmax)
 
-            #VECTS = VECTS_new
+            VECTS = VECTS_new
             
             
             

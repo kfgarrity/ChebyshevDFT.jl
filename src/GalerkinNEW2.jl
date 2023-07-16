@@ -430,7 +430,7 @@ function get_gal_rep_matrix(arr::Vector, g::gal; M = -1)
         M = g.M
     end
     N = length(arr)+1
-#    println("N $N")
+    println("N $N")
     INT = zeros(N-1, N-1)
 
 
@@ -472,13 +472,15 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP, gbvals2; M = -1)
     for n1 = 1:N-1
         vh_tilde_vec += g.bvals[2:M+2,n1,M] * vh_tilde[n1]
     end
-    #if abs(MP[l+1, m+l+1]) > 1e-6
-    #    println("MP vh $l $m ", MP[l+1, m+l+1])
-    #end
-
+    if abs(MP[l+1, m+l+1]) > 1e-6
+        println("MP vh $l $m ", MP[l+1, m+l+1])
+    end
+    
     if true
         if l == 0
-            f = (vh_tilde_vec  ./ g.R.(@view g.pts[2:M+2,M]) .+ MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
+            f = (vh_tilde_vec  ./ g.R.(@view g.pts[2:M+2,M]) .+  MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
+#            println("vh factor $l $m  tot ", (MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi)).* (@view g.w[2:M+2,M])   , " MP ", MP[l+1, m+l+1] )
+#            println("vh factor $l $m ", MP[l+1, m+l+1] / g.b^(l+1) * sqrt(pi)/(2*pi)  *(2*l+1) * sqrt(4*pi)  , " MP ", MP[l+1, m+l+1] , " sum g ", sum(g.w[2:M+2,M]))
             
             #f =  MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi)  .* (@view g.w[2:M+2,M])
         else
@@ -491,6 +493,8 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP, gbvals2; M = -1)
 
             f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+  g.R.(@view g.pts[2:M+2,M]).^l / g.b^l *  MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi) ) .* (@view g.w[2:M+2,M]) #
 
+#            println("vh factor $l $m ", MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi) , " MP ", MP[l+1, m+l+1] , " sum g ", sum(g.R.(@view g.pts[2:M+2,M]).^l / g.b^l .* g.w[2:M+2,M]))
+            
             #f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ 0.0*g.R.(@view g.pts[2:M+2,M]) / g.b *  (-1)^m  * MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi))  .* (@view g.w[2:M+2,M])
 
         end        
@@ -498,41 +502,7 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP, gbvals2; M = -1)
         f = vh_tilde_vec .* g.w[2:M+2,M]
     end
 
-#    println("vh_tilde ", vh_tilde[1:3])
     
-#    X = zeros(N-1,N-1,N-1)
-#    for n1 = 1:(N-1)
- #       for n2 = 1:(N-1)
-#            for n3 = 1:(N-1)
- #               X[n1, n2,n3] = sum(  (@view g.bvals[2:M+2,n1,M]).*(@view g.bvals[2:M+2,n2,M]) .* g.w[2:M+2,M] ./ g.R.(@view g.pts[2:M+2,M]) .*  g.bvals[2:M+2,n3,M])
- #           end
- #       end
-    #   end
-    
-#    println("size X ", size(X), " size vh ", size(vh_tilde))
-#    INT2 = zeros(N-1, N-1)
-#    for n1 = 1:(N-1)
-#        for n2 = 1:(N-1)
-#            INT2[n1,n2] = sum(X[n1,n2,:] .* vh_tilde)
-#        end
-#    end
-    
-    #    n1=1
-    
-#    println("size f $(size(f)) size bvals $(size(g.bvals[2:M+2,n1,M]))")
-    
-#    @time @threads for n1 = 1:(N-1)
-#        for n2 = 1:(N-1)
-#            INT[n1, n2] = sum(  (@view g.bvals[2:M+2,n1,M]).*(@view g.bvals[2:M+2,n2,M]) .* f)
-#        end
-#    end
-
- #   @time @threads for n1 = 1:(N-1)
- #       for n2 = 1:(N-1)
- #           INT[n1, n2] = sum(  (@view gbvals2[:,n1,n2]) .* f)
- #       end
- #   end
-
     @tturbo for n1 = 1:(N-1) #
         for n2 = 1:(N-1)
             for i = 1:(M+1)
@@ -693,6 +663,71 @@ function get_sd(r, B, α)
     d1 = (d1 - d1')/2.0
 
     return S, d1, d2
+end
+
+
+function get_I(r, B, α, R; N = missing)
+
+    if ismissing(N)
+        N = length(B)
+    end
+    
+    #    r, invr = get_r(α)
+    #    B = get_cheb_bc_grid(N, r)
+    I = zeros(N, N, N, N, 2)
+    
+    C1 = 1
+    C2 = 1
+    C3 = 1
+    C4 = 1
+
+    L = 0
+    
+    function kernel(x1,x2)
+
+        return B[C1](r(x1)) *B[C2](r(x1))*B[C3](r(x2))*B[C4](r(x2)) * min(R(r(x1)),R(r(x2)))^L  / max(R(r(x1)),R(r(x2)))^(L+1)
+        
+    end
+
+   
+    println(" test ", kernel(0.0,0.0))
+    
+
+    for l = 0:1
+        for c1 = 1:N
+            println("L $L c1 $c1")
+            for c2 = 1:N
+                for c3 = 1:N
+                    for c4 = 1:N
+                        C1=c1
+                        C2=c2
+                        C3=c3
+                        C4=c4
+                        l=L
+                        I[c1,c2,c3,c4,L+1] = QuadGK.quadgk( x1->QuadGK.quadgk( x2->kernel(x1,x2), -1,1, rtol=0.5e-8)[1], -1,1, rtol=0.5e-8)[1]
+                    end
+                end
+            end
+        end
+    end
+
+
+    S = zeros(N,N)
+
+    function over(x1)
+        return B[C1](r(x1)) *B[C2](r(x1))
+    end
+    
+    for c1 = 1:N
+        for c2 = 1:N
+            C1 = c1
+            C2 = c2
+            S[c1,c2]= QuadGK.quadgk( x1-> over(x1), -1,1,rtol=0.5e-8)[1]
+        end
+    end
+    
+    
+    return S
 end
 
 
