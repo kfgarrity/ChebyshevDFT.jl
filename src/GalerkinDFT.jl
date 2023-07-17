@@ -1848,6 +1848,11 @@ function vxx_LM5(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbv
     #mt1 = zeros(N-1, M+1)
     mt1 = zeros(N-1)
 
+    RMAT = []
+    for L = 0:lmax*2
+        push!(RMAT, get_gal_rep_matrix_R(R.^L / (2*L+1), g, gbvals2))
+    end
+    
     #println("vxx")
 
 #    S5 = S^-0.5
@@ -1923,8 +1928,28 @@ function vxx_LM5(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbv
 
                         #MATL .= (VECTS[:,n,spin, l+1, m+l+1]'*R5[L]*VECTS[:,n,spin,l+1, m+l+1]) * S*VECTS[:,n,spin,l+1, m+l+1]*(S*VECTS[:,n,spin,l+1, m+l+1])'    *(  MP_x / g.b^(L+1) * sqrt(pi)/(2*pi)  *(2*L+1) * sqrt(4*pi)  )                        
 
-                        MATL .=  real(S*VECTS[:,n,spin,l+1, m+l+1]*(S*VECTS[:,n,spin,l+1, m+l+1])')    *(  MP_x[L+1]^2 *(2*L+1)/f/g.b^L / g.b^(L+1) * sqrt(pi)/(2*pi)  *(2*L+1) * sqrt(4*pi)  ) 
+#                        if l == L
 
+                        #                        MATL .=  real(S*VECTS[:,n,spin,l+1, m+l+1]*(S*VECTS[:,n,spin,l+1, m+l+1])')    *(  MP_x[L+1]*MP_x[L+1] *(2*L+1)/f/g.b^L / g.b^(L+1) * sqrt(pi)/(2*pi)  *(2*L+1) * sqrt(4*pi)  )
+
+                        #                        MATL .=  real(S*VECTS[:,n,spin,l+1, m+l+1]*(S*VECTS[:,n,spin,l+1, m+l+1])')    *(  MP_x[L+1]*MP_x[L+1] *(2*L+1)/f/g.b^L / g.b^(L+1) * sqrt(pi)/(2*pi)  *(2*L+1) * sqrt(4*pi)  )
+
+
+
+
+
+
+
+                        #best guess
+#                        MATL .=  real(S*VECTS[:,n,spin,l+1, m+l+1]*(S*VECTS[:,n,spin,l+1, m+l+1])')    *(  MP_x[L+1]*MP_x[L+1] *(2*L+1)/f/g.b^L / g.b^(L+1) * sqrt(pi)/(2*pi)  *(2*L+1) * sqrt(4*pi)  )
+
+                        #new
+                        MATL .= real(RMAT[L+1]*VECTS[:,n,spin,l+1, m+l+1]*(RMAT[L+1]*VECTS[:,n,spin,l+1, m+l+1])') * f / g.b^L / g.b^(L+1) * sqrt(pi)/(2*pi) * sqrt(4*pi) * (2*L+1)^2
+                        
+#                        else
+#                            MATL .=  real(S*VECTS[:,n,spin,l+1, m+l+1]*(S*VECTS[:,n,spin,l+1, m+l+1])')    *(  MP_x[L+1]^2 *(2*L+1)/f/g.b^L / g.b^(L+1) * sqrt(pi)/(2*pi)  *(2*L+1) * sqrt(4*pi)  ) 
+#                        end
+                        
                         #MATL .=  diagm(S*VECTS[:,n,spin,l+1, m+l+1])*R5[L]*diagm(S*VECTS[:,n,spin,l+1, m+l+1])    *(  MP_x[L+1]  / g.b^(L+1) * sqrt(pi)/(2*pi)  *(2*L+1) * sqrt(4*pi)  ) 
 
                         #println("go spin $spin,  $n, $l $m, L $L ", sum(abs.(MATL)))
@@ -1943,7 +1968,7 @@ function vxx_LM5(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbv
                                         for ii = 1:N-1
                                             for jj = 1:N-1
                                                 #                                                VX_LM2[ii,jj,spin,l1+1,m1+l1+1,l2+1,m2+l2+1] += -ta*(temp[ii,jj])
-                                                VX_LM2[ii,jj,spin,l1+1,m1+l1+1,l2+1,m2+l2+1] += -ta*temp[ii,jj] - ta*MATL[ii,jj] 
+                                                VX_LM2[ii,jj,spin,l1+1,m1+l1+1,l2+1,m2+l2+1] += -ta*temp[ii,jj] - ta*MATL[ii,jj] #* pi^L #/7.9314220444898185 
                                             end
                                         end
                                         if l1 == l2 && m1 == m2
