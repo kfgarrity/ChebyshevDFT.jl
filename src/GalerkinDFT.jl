@@ -139,7 +139,40 @@ function h_rad(n, l;Z=1.0)
     
 end
 
+function mix_vects(VECTS, VECTS_new, mix, filling, S, nspin, lmax, N)
 
+    for spin = 1:nspin
+        for l = 0:lmax #this is the sum over b
+            for m = -l:l
+                for n = 1:N-1 #this is the sum over b as well
+                    
+                    f = filling[n,spin,l+1,m+l+1]
+                    if f < 1e-20
+                        break
+                    end
+                    #a =  real(abs(sum(VECTS[:,n,spin,l+1, m+l+1] -  VECTS_new[:,n,spin,l+1, m+l+1])))
+                    #b =  real(abs(sum(VECTS[:,n,spin,l+1, m+l+1] +  VECTS_new[:,n,spin,l+1, m+l+1])))
+                    #if a < b
+                    #    sign = +1.0
+                    #else
+                    #    sign = -1.0
+                    #end
+                    println("t $spin $l $m $n ", real(VECTS[:,n,spin,l+1, m+l+1]'*S*VECTS_new[:,n,spin,l+1, m+l+1]))
+                    s = sign(real(VECTS[:,n,spin,l+1, m+l+1]'*S*VECTS_new[:,n,spin,l+1, m+l+1]))
+                    
+                    VECTS[:,n,spin,l+1, m+l+1] = VECTS[:,n,spin,l+1, m+l+1]*(1-mix) + s*mix*VECTS_new[:,n,spin,l+1, m+l+1]
+
+                    norm = real(VECTS[:,n,spin,l+1, m+l+1]'*S*VECTS[:,n,spin,l+1, m+l+1])
+                    VECTS[:,n,spin,l+1, m+l+1] = VECTS[:,n,spin,l+1, m+l+1] ./ norm^0.5
+                    
+                end
+            end
+        end
+    end
+
+    #no return
+    
+end
 
 function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
 
@@ -669,9 +702,9 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
                     gcoef = real_gaunt_dict[(lr,mr,l,m,l,m)]
                     for spin = 1:nspin
                         rho_rs_M_R2_LM[:,spin, lr+1,mr+lr+1] += gcoef * rho_rs_M_R2_LM2[:,spin, l+1, m+1+l]
-                        if sum(abs.(gcoef * rho_rs_M_R2_LM2[:,spin, l+1, m+1+l])) > 1e-8
-                            println("add rho spin $spin, lmr $lr $mr,  $l $m  ", gcoef, " sum ", sum(rho_rs_M_R2_LM2[:,spin, l+1, m+1+l]))
-                        end
+#                        if sum(abs.(gcoef * rho_rs_M_R2_LM2[:,spin, l+1, m+1+l])) > 1e-8
+#                            println("add rho spin $spin, lmr $lr $mr,  $l $m  ", gcoef, " sum ", sum(rho_rs_M_R2_LM2[:,spin, l+1, m+1+l]))
+#                        end
                         if gga
                             drho_rs_M_R2_LM[:,spin, lr+1,mr+lr+1] += gcoef * drho_rs_M_R2_LM2[:,spin, l+1, m+1+l]
                         end
@@ -1857,7 +1890,7 @@ function vxx_LM5(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbv
 
 #    S5 = S^-0.5
 
-    for spin = 1:nspin
+#=    for spin = 1:nspin
         for l = 0:lmax #this is the sum over b
             for m = -l:l
                 for n = 1:N-1 #this is the sum over b as well
@@ -1874,10 +1907,10 @@ function vxx_LM5(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbv
                                 if f1 < 1e-20
                                     break
                                 end
-                                for L = 0:lmax*2
-                                    println("test L $L,  $n $l $m , $n1 $l1 $m1 ", (VECTS[:,n,spin, l+1, m+l+1]'*R5[L]*VECTS[:,n1,spin,l1+1, m1+l1+1]))
-                                end
-                                println()
+#                                for L = 0:lmax*2
+#                                    println("test L $L,  $n $l $m , $n1 $l1 $m1 ", (VECTS[:,n,spin, l+1, m+l+1]'*R5[L]*VECTS[:,n1,spin,l1+1, m1+l1+1]))
+#                                end
+#                                println()
                             end
                         end
                     end
@@ -1885,7 +1918,7 @@ function vxx_LM5(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbv
             end
         end
     end
-
+=#
                                     
     
     for spin = 1:nspin
@@ -1971,15 +2004,15 @@ function vxx_LM5(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbv
                                                 VX_LM2[ii,jj,spin,l1+1,m1+l1+1,l2+1,m2+l2+1] += -ta*temp[ii,jj] - ta*MATL[ii,jj] #* pi^L #/7.9314220444898185 
                                             end
                                         end
-                                        if l1 == l2 && m1 == m2
-                                            println("factor $l $m, $l1 $m1,  $l2 $m2  L  $L  ", (  MP_x[L+1] / g.b^(L+1) * sqrt(pi)/(2*pi)    ) ,  "  ta $ta  MP_x $(MP_x[L+1]) tot ", sum(abs.(ta*MATL)))
-                                        end
+#                                        if l1 == l2 && m1 == m2
+#                                            println("factor $l $m, $l1 $m1,  $l2 $m2  L  $L  ", (  MP_x[L+1] / g.b^(L+1) * sqrt(pi)/(2*pi)    ) ,  "  ta $ta  MP_x $(MP_x[L+1]) tot ", sum(abs.(ta*MATL)))
+#                                        end
                                         
                                     end
                                 end
                             end
                         end
-                        println()
+#                        println()
                         
                     end
                     
@@ -3065,7 +3098,9 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
         println("rho1")
         @time if mix_lm == false
             #println("get rho small time")
-            rho_R2_new, rho_dR_new, rho_rs_M_new,  drho_rs_M_LM, MP = get_rho(VALS, VECTS_new, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga, exx, nmax)
+            rho_R2_new, rho_dR_new, rho_rs_M_new,  drho_rs_M_LM, MP_new = get_rho(VALS, VECTS_new, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga, exx, nmax)
+
+            
         else
             #println("get rho big time")
             rho_R2_new, rho_dR_new, rho_rs_M_new, MP_new, drho_rs_M_LM  = get_rho_big(VALS, VALS_BIG, VECTS_BIG, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2, lm_dict, dict_lm, big_code, gga, R) 
@@ -3073,9 +3108,9 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
 
         
         begin 
-#            rho_R2 = rho_R2_new * mix + rho_R2 *(1-mix)
-#            rho_dR = rho_dR_new * mix + rho_dR * (1-mix)
-#            rho_rs_M = rho_rs_M_new * mix + rho_rs_M * (1-mix)
+            #rho_R2 = rho_R2_new * mix + rho_R2 *(1-mix)
+            #rho_dR = rho_dR_new * mix + rho_dR * (1-mix)
+            #rho_rs_M = rho_rs_M_new * mix + rho_rs_M * (1-mix)
 
             #MP = MP_new*mix + MP*(1-mix) #this is approximation for higher multipoles.
             
@@ -3083,14 +3118,19 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
 #            t2_new = get_t2(VECTS_new, mat_n2m, mat_m2n, N, M, nspin, lmax)
             
  #           t2 = t2*mix + t2_new * (1-mix)
+
+            rho_R2_old = deepcopy(rho_R2)
+            mix_vects(VECTS, VECTS_new, mix, filling, S, nspin, lmax, N)
+            #VECTS = VECTS*mix + VECTS_new*(1-mix)
+
+
+#            println("rho2")
+            #rho_R2, rho_dR, rho_rs_M,  drho_rs_M_LM, MP = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga, exx, nmax)
+            rho_R2, rho_dR, rho_rs_M,  drho_rs_M_LM, MP                = get_rho(VALS, VECTS    , nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga, exx, nmax)
+
+            println("test diff rho ", sum(abs.(rho_R2 - rho_R2_old)))
             
-            VECTS = VECTS*mix + VECTS_new*(1-mix)
-
-
-            println("rho2")
-            @time rho_R2, rho_dR, rho_rs_M,  drho_rs_M_LM, MP = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga, exx, nmax)
-
-            VECTS = VECTS_new
+            #            VECTS = VECTS_new
             
             
             
