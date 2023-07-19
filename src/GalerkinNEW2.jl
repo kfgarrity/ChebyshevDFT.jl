@@ -16,7 +16,7 @@ struct gal
     α::Float64
     bvals::Array{Float64, 3}
     dbvals::Array{Float64, 3}
-#    ddbvals::Array{Float64, 3}
+    ddbvals::Array{Float64, 3}
     pts::Array{Float64, 2}
     w::Array{Float64, 2}
     s::Array{Float64, 2}
@@ -52,10 +52,6 @@ function makegal(N,a,b; α=0.0, M = -1)
 
     
     B, dB = get_cheb_bc_grid(N, r)
-    
-    s,d1,d2 = get_sd(r, B, α)
-
-    #    println(size(bvals))
 
     function R(x)
         return a .+ (x .- -1.0)*(b-a) / 2.0
@@ -64,10 +60,21 @@ function makegal(N,a,b; α=0.0, M = -1)
         return -1.0 + 2 * (a - r)/(a-b)
     end
     dr = rrr->ForwardDiff.derivative(rr-> r.(X.(rr)), rrr)
-
-    pts, w, bvals, dbvals = setup_integral_mats_grid_new(N, M, r, invr, dr, R,  B)
+    pts, w, bvals, dbvals, ddbvals = setup_integral_mats_grid_new(N, M, r, invr, dr, R,  B)
     
-    return gal(N,M,a,b,α,bvals,dbvals,pts,w,s,inv(s),d1,d2,r,invr,dr, R,X,B,dB)
+
+    #s,d1,d2 = get_sd(r, B, α)
+    s,d1,d2 = get_sd_fast(r, B, α, bvals, dbvals, ddbvals, N, M, w, a, b)
+
+    #println("s_fast")
+    #println(s_fast[1:3,1:3])
+    
+    #println("s check ", sum(abs.(s-s_fast)))
+    #    println(size(bvals))
+
+
+    
+    return gal(N,M,a,b,α,bvals,dbvals,ddbvals,pts,w,s,inv(s),d1,d2,r,invr,dr,R,X,B,dB)
 
 end
 
@@ -653,11 +660,83 @@ function get_sd(r, B, α)
             #            if c1 == c2
             #                d1[c1,c2] = 0.0
             #            else
-            #d1[c1,c2] = QuadGK.quadgk(d1int, -1,1, atol=0.5e-10)[1]
+            d1[c1,c2] = QuadGK.quadgk(d1int, -1,1, atol=0.5e-10)[1]
             #            end
         end
     end
     
+    S = (S+S')/2.0
+    d2 = (d2 + d2')/2.0
+    d1 = (d1 - d1')/2.0
+
+    return S, d1, d2
+end
+
+function get_sd_fast(r, B, α, bvals, dbvals, ddbvals, N, M, w, a, b)
+
+    #N = length(B)
+    #    r, invr = get_r(α)
+    #    B = get_cheb_bc_grid(N, r)
+    S = zeros(N-1, N-1)
+
+    C1 = 1
+    C2 = 1
+    
+#    function over(x)
+#
+#        return B[C1](r(x))*B[C2](r(x))
+#    end
+
+    #    println("overlaps")
+    @tturbo for c1 = 1:N-1
+        for c2 = 1:N-1
+            for x = 2:M+2
+                S[c1,c2] += bvals[x,c1,M]*bvals[x,c2,M]*w[x,M]
+            end
+        end
+    end
+    d2 = zeros(length(B), length(B))
+    d1 = zeros(length(B), length(B))
+
+    @tturbo for c1 = 1:N-1
+        for c2 = 1:N-1
+            for x = 2:M+2
+                d1[c1,c2] += bvals[x,c1,M]*dbvals[x,c2,M]*w[x,M] * (b-a)/2.0
+                d2[c1,c2] += bvals[x,c1,M]*ddbvals[x,c2,M]*w[x,M]* (b-a)^2/2.0^2
+            end
+        end
+    end
+    
+    #=
+    B2 = []
+    B1 = []
+    for (c1, b1) in enumerate(B)
+        b1_1 = bb -> ForwardDiff.derivative(aa->b1(r(aa)), bb)
+        b1_2 = cc -> ForwardDiff.derivative(b1_1, cc)
+        push!(B2, b1_2)
+        push!(B1, b1_1)
+    end
+    function d2int(x)
+        return B[C1](r(x))*B2[C2](x)
+    end
+    function d1int(x)
+        return B[C1](r(x))*B1[C2](x)
+    end
+
+#    println("derivs")
+    for c1 in 1:length(B)
+        for (c2, b2) in enumerate(B)
+            C1=c1
+            C2=c2   
+            d2[c1,c2] = QuadGK.quadgk(d2int, -1,1, rtol=0.5e-10)[1]
+            #            if c1 == c2
+            #                d1[c1,c2] = 0.0
+            #            else
+            #d1[c1,c2] = QuadGK.quadgk(d1int, -1,1, atol=0.5e-10)[1]
+            #            end
+        end
+    end
+=#    
     S = (S+S')/2.0
     d2 = (d2 + d2')/2.0
     d1 = (d1 - d1')/2.0
@@ -772,7 +851,7 @@ end
 
 function setup_integral_mats_grid_new(NN, Nmax, r, invr, dr, R, B)
 
-    #    println("setup")
+    
     begin
         #Nmax = Int64(round(NN * 2.0 + 3))
         #        println("Nmax $Nmax")
@@ -782,7 +861,7 @@ function setup_integral_mats_grid_new(NN, Nmax, r, invr, dr, R, B)
         Bvals = zeros(Nmax+3,NN-1,Nmax)
 
         dBvals = zeros(Nmax+3,NN-1,Nmax)
-#        ddBvals = zeros(Nmax+3,NN-1,Nmax)
+        ddBvals = zeros(Nmax+3,NN-1,Nmax)
         
 
         #        r, invr = get_r(α)
@@ -797,10 +876,22 @@ function setup_integral_mats_grid_new(NN, Nmax, r, invr, dr, R, B)
         return B[nnX](x)
     end
 
-    dget = x->ForwardDiff.derivative(get, x)
+    B1 = []
+    B2 = []
+    for n = 1:length(B)
+        push!(B1, derivative(B[n]))
+        push!(B2, derivative(derivative(B[n])))
+    end
     
     
-    for N = 1:Nmax
+#        dget = x->ForwardDiff.derivative(get, x)
+#        ddget = x2->ForwardDiff.derivative(dget, x2)
+    
+    #println("loop")
+
+
+    
+    @threads for N = 1:Nmax
         #for N = [Nmax]
         #        println("N $N")
 
@@ -809,6 +900,7 @@ function setup_integral_mats_grid_new(NN, Nmax, r, invr, dr, R, B)
         PTS[1:N+3,N] = invr.(pts)
 
         DR = dr.(R.(invr.(pts)))
+        DR2 = dr.(R.(invr.(pts))).^2
         #g.R.(g.pts[2:M+2,M])
         
         W[1:N+3, N] = w .* dinvr.(pts)
@@ -817,16 +909,17 @@ function setup_integral_mats_grid_new(NN, Nmax, r, invr, dr, R, B)
         #        W[N,1:N+3] = w 
         
         for nn = 1:(NN-1)
-            nnX = nn
-            Bvals[1:N+3, nn, N] = get.(Float64.(pts))
-            dBvals[1:N+3, nn, N] = dget.(Float64.(pts)) .* DR
-            
-            #            ddBvals[1:N+3, nn, N] = ddget.(Float64.(pts))
+            nnY = nn
+            Bvals[1:N+3, nn, N] =  B[nn].(pts) #get.(Float64.(pts))
+            dBvals[1:N+3, nn, N] = B1[nn].(pts) .* DR
+            ddBvals[1:N+3, nn, N] = B2[nn].(pts) .* DR2
+            #dBvals[1:N+3, nn, N] = dget.(Float64.(pts)) .* DR
+            #ddBvals[1:N+3, nn, N] = ddget.(Float64.(pts)) .* DR.^2
         end
         
     end
 
-    return PTS, W, Bvals, dBvals
+    return PTS, W, Bvals, dBvals, ddBvals
     
 end
 
