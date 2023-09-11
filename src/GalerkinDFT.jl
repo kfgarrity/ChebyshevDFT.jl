@@ -147,9 +147,9 @@ function mix_vects(VECTS, VECTS_new, mix, filling, S, nspin, lmax, N)
                 for n = 1:N-1 #this is the sum over b as well
                     
                     f = filling[n,spin,l+1,m+l+1]
-                    if f < 1e-20
-                        break
-                    end
+#                    if f < 1e-20
+#                        break
+#                    end
                     #a =  real(abs(sum(VECTS[:,n,spin,l+1, m+l+1] -  VECTS_new[:,n,spin,l+1, m+l+1])))
                     #b =  real(abs(sum(VECTS[:,n,spin,l+1, m+l+1] +  VECTS_new[:,n,spin,l+1, m+l+1])))
                     #if a < b
@@ -157,7 +157,7 @@ function mix_vects(VECTS, VECTS_new, mix, filling, S, nspin, lmax, N)
                     #else
                     #    sign = -1.0
                     #end
-                    println("t $spin $l $m $n ", real(VECTS[:,n,spin,l+1, m+l+1]'*S*VECTS_new[:,n,spin,l+1, m+l+1]))
+#                    println("t $spin $l $m $n ", real(VECTS[:,n,spin,l+1, m+l+1]'*S*VECTS_new[:,n,spin,l+1, m+l+1]))
                     s = sign(real(VECTS[:,n,spin,l+1, m+l+1]'*S*VECTS_new[:,n,spin,l+1, m+l+1]))
                     
                     VECTS[:,n,spin,l+1, m+l+1] = VECTS[:,n,spin,l+1, m+l+1]*(1-mix) + s*mix*VECTS_new[:,n,spin,l+1, m+l+1]
@@ -174,7 +174,50 @@ function mix_vects(VECTS, VECTS_new, mix, filling, S, nspin, lmax, N)
     
 end
 
-function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
+
+function mix_vects_big(VECTS, VECTS_new, mix, filling, Sbig, nspin, lmax, N, big_code, big_code_new, VALS, VALS_big)
+    println("mix_vects_big")
+    for spin = 1:nspin
+        for l = 0:lmax #this is the sum over b
+            for m = -l:l
+                nlist_old = big_code[(spin,l, m)]
+                nlist_new = big_code_new[(spin,l, m)]
+#                println("l $l m $m nlist_old ", nlist_old)
+#                println("l $l m $m nlist_new ", nlist_new)
+                for (n_count, (n_old, n_new)) in enumerate(zip(nlist_old, nlist_new))
+                    f = filling[n_count,spin,l+1,m+l+1]
+                    VALS[n_count, spin, l+1, l+m+1] = VALS_big[n_new,spin]                    
+#                    println("VALS ", VALS_big[n_new,spin], ["count ", n_count, "new ", n_new, spin, "l ", l, "m ", m])
+#                    if f < 1e-20
+#                        break
+#                    end
+                    #a =  real(abs(sum(VECTS[:,n,spin,l+1, m+l+1] -  VECTS_new[:,n,spin,l+1, m+l+1])))
+                    #b =  real(abs(sum(VECTS[:,n,spin,l+1, m+l+1] +  VECTS_new[:,n,spin,l+1, m+l+1])))
+                    #if a < b
+                    #    sign = +1.0
+                    #else
+                    #    sign = -1.0
+                    #end
+                    #println("t $spin $l $m $n ", real(VECTS[:,n_old,spin]'*S*VECTS_new[:,n_new,spin]))
+                    s = sign(real(VECTS[:,n_old,spin]'*Sbig*VECTS_new[:,n_new,spin]))
+                    
+                    VECTS[:,n_old,spin] = VECTS[:,n_old,spin]*(1-mix) + s*mix*VECTS_new[:,n_new,spin]
+
+                    norm = real(VECTS[:,n_old,spin]'*Sbig*VECTS[:,n_old,spin])
+                    VECTS[:,n_old,spin] = VECTS[:,n_old,spin] ./ norm^0.5
+
+
+                    
+                end
+            end
+        end
+    end
+    
+    #no return
+    
+end
+
+function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm)
 
     if typeof(Z) == String || typeof(Z) == Symbol
         Z = atoms[String(Z)]
@@ -193,7 +236,7 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
             end
         end
     end
-
+    
     println("setup filling")
     @time nel, nspin, lmax, filling = setup_filling(fill_str, N, lmax_init=lmax)
 
@@ -206,7 +249,18 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
     @time funlist, gga = choose_exc(exc, nspin)
 
 
+    lm_dict = Dict()
+    dict_lm = Dict()
+    c=0
+    for l = 0:(lmax)
+        for m = -l:l
+            lm_dict[(l,m)] = c
+            c+=1
+            dict_lm[c] = (l,m)
+        end
+    end
 
+    
     function V_c(r)
         return -Z / r 
     end
@@ -229,7 +283,12 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
     #        push!(V_l, vl)
     #    end
 
-    VECTS = zeros(Complex{Float64}, N-1,N-1, nspin, lmax+1,2*lmax+1 )
+    if mix_lm
+        VECTS = zeros(Complex{Float64}, length(lm_dict) * (N-1), length(lm_dict) * (N-1), nspin)
+    else
+        VECTS = zeros(Complex{Float64}, N-1,N-1, nspin, lmax+1,2*lmax+1 )
+    end
+    
     VALS = zeros(N-1,nspin, lmax+1,2*lmax+1 )
 
 
@@ -244,6 +303,11 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
    #    println("size VECTS ", size(VECTS))
 
     #    println("initial eig")
+
+    println("lm_dict")
+    println(lm_dict)
+    big_code = Dict()
+    counter = 1
     for ll = 0:lmax
         vals, vects = eigen(D2 + V_C + ll*(ll+1)*V_L, S)
 
@@ -256,15 +320,27 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
         #vals, vects = eigen( invsqrtS*(D2 + VC[ll+1])*invsqrtS)
         
         println("vals $ll $(vals[1:3])")
-        for spin = 1:nspin
-            for m = 1:(2*(ll)+1)
-                #                println("spin $spin ll $ll m $m , ", size(vects))
-                VECTS[:,:,spin, ll+1, m] = vects
+        for m = 1:(2*(ll)+1)
+            for spin = 1:nspin
+                big_code[(spin,ll, m-ll-1)] = counter:(counter+N-2)
+                println("add to big code ", (spin,ll, m-ll-1))
+                if mix_lm == true
+                    ind = ( 1:(N-1)) .+ (N-1)*lm_dict[(ll,m - ll - 1)]
+                    println("l $ll m $m spin $spin")
+                    println("ind ", ind)
+                    println("big_code ", big_code[(spin,ll, m-ll-1)] )
+                    
+                    VECTS[ind,big_code[(spin,ll, m-ll-1)],spin] = vects
+                else
+                    VECTS[:,:,spin, ll+1, m] = vects
+                end
                 VALS[:,spin, ll+1, m] = vals
+                println("vals prepare $ll $m ", vals[1:3])
             end
+            counter += N-1
         end
     end
-
+    
     
     LEB = makeleb(lmaxrho*2+1 , lmax=max(lmaxrho, lmax*2) )
 
@@ -346,8 +422,29 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
         #R5[L] = mat_m2n*diagm( (R/g.b).^(L/2 ) ) * mat_n2m
     end
 
+    if mix_lm
+        Sbig = zeros( (N-1)*length(lm_dict), (N-1)*length(lm_dict))
+        for l = 0:(lmax)
+            for m = -l:l
+                ind1 = (1: (N-1)) .+ (N-1)*lm_dict[(l,m)]
+                for l2 = 0:(lmax)
+                    for m2 = -l2:l2
+                        ind2 = (1:(N-1)) .+ (N-1)*lm_dict[(l2,m2)]
+                        if l == l2 && m == m2
+                            Sbig[ind1,ind2] += S                            
+                        end
+                    end
+                end
+            end
+        end
+        Sbig= Hermitian(Sbig)
+    else
+        Sbig = Hermitian(zeros(1,1))
+    end
+        
     
-    return Z, nel, filling, nspin, lmax, V_C, V_L,D1, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga, LEB, R, gbvals2, nmax, hf_sym, mat_n2m, mat_m2n, R5, LINOP
+    
+    return Z, nel, filling, nspin, lmax, V_C, V_L,D1, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga, LEB, R, gbvals2, nmax, hf_sym, mat_n2m, mat_m2n, R5, LINOP, lm_dict, dict_lm, big_code, Sbig
     
 end
 
@@ -883,7 +980,7 @@ end
 
 
 
-function get_rho_big(VALS, VALS_big, VECTS_big, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2, lm_dict,dict_lm, big_code, gga, R)
+function get_rho_big(VALS, VECTS_big, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2, lm_dict,dict_lm, big_code, gga, R; VALS_big = missing)
 
     #    println("SIZE VB ", size(VECTS_big))
 
@@ -908,7 +1005,9 @@ function get_rho_big(VALS, VALS_big, VECTS_big, nel, filling, nspin, lmax, lmaxr
                     if c_n > N-1
                         continue
                     end
-                    VALS[c_n, spin, l+1, l+1+m] = VALS_big[n, spin]
+
+
+                    
                     fillval = filling[c_n, spin, l+1, l+m+1]
                     #                    println("add fillval $spin $l $m ", fillval)
                     if fillval < 1e-20
@@ -1151,7 +1250,7 @@ function get_rho_big(VALS, VALS_big, VECTS_big, nel, filling, nspin, lmax, lmaxr
     x = 1.0
     #println("test gal_rep_to_rspace ", gal_rep_to_rspace(x, rho_gal_R2[:,1], g), " " , gal_rep_to_rspace(x, rho_gal_dR[:,1], g) * x)
     
-    return rho_gal_R2_LM, rho_gal_dR_LM, rho_rs_M_LM, MP, drho_rs_M_LM
+    return rho_gal_R2_LM, rho_gal_dR_LM, rho_rs_M_LM, drho_rs_M_LM, MP
 
 end
 
@@ -1883,7 +1982,7 @@ function vxx_LM5(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbv
 
     RMAT = []
     for L = 0:lmax*2
-        push!(RMAT, get_gal_rep_matrix_R(R.^L / (2*L+1), g, gbvals2))
+        push!(RMAT, get_gal_rep_matrix_R(R.^L / (2*L+1), g, gbvals2, N = N))
     end
     
     #println("vxx")
@@ -2016,6 +2115,115 @@ function vxx_LM5(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbv
                         
                     end
                     
+                end
+            end
+        end
+    end
+
+    
+    t1 = zeros(N-1,N-1)
+    t2 = zeros(N-1,N-1)
+    
+    for spin = 1:nspin
+        for l1 = 0:lmax
+            for m1 = -l1:l1
+                for l2 = 0:lmax
+                    for m2 = -l2:l2
+                        t1 .= (@view VX_LM2[:,:,spin,l1+1,m1+l1+1,l2+1,m2+l2+1])
+                        t2 .= (@view VX_LM2[:,:,spin,l2+1,m2+l2+1,l1+1,m1+l1+1])
+#                        println("t1t2 spin $spin,  $l1 $m1,  $l2 $m2    ", sum(abs.(t1 - t2)), "     diff     " , sum(abs.(t1 - t2')), "     tot      ", sum(abs.(t1)))
+                        VX_LM2[:,:,spin,l1+1,m1+l1+1,l2+1,m2+l2+1] .= 0.5*(t1 + t2')
+                        VX_LM2[:,:,spin,l2+1,m2+l2+1,l1+1,m1+l1+1] .= 0.5*(t1' + t2)
+                    end
+                end
+            end
+        end
+    end    
+    
+    if nspin == 1
+        VX_LM2 .= VX_LM2 * exx/2.0
+    else
+        VX_LM2 .= VX_LM2 * exx
+    end
+
+
+end
+
+
+function vxx_LM5_big(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbvals2, exx, nspin, filling, VECTS, S, hf_sym, R5, big_code, lm_dict)
+
+    VX_LM2 .= 0.0
+
+    MP_x = zeros(lmax*2+1)
+
+    temp = zeros(N-1,N-1)
+
+    MAT = zeros(N-1, N-1)
+    MATL = zeros(N-1, N-1)
+    t = zeros(M+1)
+    tf1 = zeros(M+1)
+    mt = zeros(N-1, M+1)
+    #mt1 = zeros(N-1, M+1)
+    mt1 = zeros(N-1)
+
+    RMAT = []
+    for L = 0:lmax*2
+        push!(RMAT, get_gal_rep_matrix_R(R.^L / (2*L+1), g, gbvals2, N = N))
+    end
+    
+    for spin = 1:nspin
+        for lX = 0:lmax #this is the sum over b
+            for mX = -lX:lX
+                nlist = big_code[(spin,lX, mX)]
+                for (n_count, n) = enumerate(nlist) #this is the sum over b as well
+                    f = filling[n_count,spin,lX+1,mX+lX+1]
+                    if f < 1e-20
+                        break
+                    end
+
+                    for l = 0:(lmax)
+                        for m = -l:l
+                            
+                            ind = (1:(N-1)) .+ (N-1)*lm_dict[(l,m)]
+                    
+                            t .= real(mat_n2m*(@view VECTS[ind,n,spin]))
+                            tf1 .=  t ./ R  / sqrt(g.b-g.a) * sqrt(2 )
+                            mt .= mat_n2m'*diagm(tf1)
+
+                            MP_x .= 0.0
+                            
+                            for L = 0:lmax*2
+                                
+                                MP_x[L+1] = f * sum( ( t.*conj(t) .*R.^L .* g.w[2:M+2,M])) / (2*L +1)
+                            end
+
+
+                            for L =  0:lmax*2
+
+
+                                temp .=  mt * LINOP[L] * mt' *( (2*L+1)*f/2.0 ) #+ MATL 
+
+                                MATL .= real(RMAT[L+1]*VECTS[ind,n,spin]*(RMAT[L+1]*VECTS[ind,n,spin])') * f / g.b^L / g.b^(L+1) * sqrt(pi)/(2*pi) * sqrt(4*pi) * (2*L+1)^2
+                                
+                                for l1 = 0:lmax
+                                    for m1 = -l1:l1
+                                        for l2 = 0:lmax
+                                            for m2 = -l2:l2
+                                                ta = hf_sym[l+1, l+m+1,l1+1,m1+l1+1,l2+1,m2+l2+1, L+1]
+                                                for ii = 1:N-1
+                                                    for jj = 1:N-1
+                                                        #                                                VX_LM2[ii,jj,spin,l1+1,m1+l1+1,l2+1,m2+l2+1] += -ta*(temp[ii,jj])
+                                                        VX_LM2[ii,jj,spin,l1+1,m1+l1+1,l2+1,m2+l2+1] += -ta*temp[ii,jj] - ta*MATL[ii,jj] #* pi^L #/7.9314220444898185 
+                                                    end
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                                
+                            end
+                        end
+                    end
                 end
             end
         end
@@ -2619,7 +2827,7 @@ function solve_small(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho
                     #                    VLM += 4*pi*VX_LM[:,:,spin, l+1,l+m+1, l+1,l+m+1]/(4*pi)
                     if exx > 1e-12
                         #VLM += 4*pi*VX_LM[:,:,spin, l+1,l+m+1]/(4*pi)
-                        VLM_old = deepcopy(VLM)
+#                        VLM_old = deepcopy(VLM)
                         VLM += VX_LM[:,:,spin, l+1,l+m+1, l+1, l+m+1]
 #                        println("size VLM_old ", size(VLM_old ), " size VX ", size(VX_LM[:,:,spin, l+1,l+m+1, l+1, l+m+1]))
 #                        println("sum abs  XX $l $m  ", sum(abs.( VX_LM[:,:,spin, l+1,l+m+1, l+1, l+m+1])))
@@ -2652,7 +2860,7 @@ function solve_small(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho
 end
 
 
-function solve_big(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, funlist, lm_dict)
+function solve_big(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, funlist, lm_dict, VECTS, VALS,exx, Sbig)
 
     VLM = zeros(size(V_C))
 
@@ -2662,20 +2870,22 @@ function solve_big(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, 
 
     c=length(lm_dict)
     Hbig = zeros(Nsmall * c, Nsmall * c)
-    Sbig = zeros(Nsmall * c, Nsmall * c)
+#    Sbig = zeros(Nsmall * c, Nsmall * c)
 
     N = Nsmall * c
 
     VECTS_BIG = zeros(Float64, N,N,nspin)
     VALS_BIG = zeros(Float64, N,nspin)
+    VECTS_new = zeros(eltype(VECTS), size(VECTS))
 
+    
 #    println("lmax $lmax ")
     big_code = Dict()
 
     for spin = 1:nspin
         Hbig .= 0.0
-        Sbig .= 0.0
-        #println("prepare mat")
+#        Sbig .= 0.0
+
         for l = 0:(lmax)
             for m = -l:l
                 ind1 = (1:Nsmall) .+ Nsmall*lm_dict[(l,m)]
@@ -2687,7 +2897,7 @@ function solve_big(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, 
                         if l == l2 && m == m2
                             Hbig[ind1,ind2] += V_C + V_L*l*(l+1)
                             Hbig[ind1,ind2] += D2
-                            Sbig[ind1,ind2] += S                            
+#                            Sbig[ind1,ind2] += S                            
                             #                            println("add S $l $m  $l2 $m2")
                         end
 
@@ -2713,6 +2923,10 @@ function solve_big(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, 
                                     #                                    end
                                 end
                             end
+                            if exx > 1e-12
+                                VLM += VX_LM[:,:,spin, l+1,l+m+1, l2+1, l2+m2+1]
+                            end
+                            println("sum abs $l $m   $l2 $m2   ", sum(abs.(VLM)))
                             Hbig[ind1,ind2] +=  VLM
                             
                         end
@@ -2740,6 +2954,8 @@ function solve_big(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, 
         #println("eig")
         vals, vects = eigen(Hh, Sh)
 
+        println("HAMTEST spin $spin h ", sum(abs.(Hh)), " s ", sum(abs.(Sh)))
+        
         println("stuff")
         begin
             VALS_BIG[:,spin] = vals
@@ -2987,21 +3203,11 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     
     
    # println("time prepare")
-    Z, nel, filling, nspin, lmax, V_C, V_L, D1, D2, S, invsqrtS, invS, VECTS_start, VALS, funlist, gga, LEB, R, gbvals2, nmax, hf_sym, mat_n2m, mat_m2n, R5, LINOP = prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho)
+    Z, nel, filling, nspin, lmax, V_C, V_L, D1, D2, S, invsqrtS, invS, VECTS_start, VALS, funlist, gga, LEB, R, gbvals2, nmax, hf_sym, mat_n2m, mat_m2n, R5, LINOP, lm_dict, dict_lm, big_code, Sbig = prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm)
     if ismissing(VECTS)
         VECTS = VECTS_start
     end
 
-    lm_dict = Dict()
-    dict_lm = Dict()
-    c=0
-    for l = 0:(lmax)
-        for m = -l:l
-            lm_dict[(l,m)] = c
-            c+=1
-            dict_lm[c] = (l,m)
-        end
-    end
 
     
     println("lmaxrho $lmaxrho")
@@ -3009,7 +3215,12 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     #println("vChebyshevDFT.Galerkin.do_1d_integral(VECTS[:,1,1,1], g) ", do_1d_integral(real.(VECTS[:,1,1,1,1]).^2, g))
     
     #println("initial get rho time")
-    rho_R2, rho_dR, rho_rs_M, drho_rs_M_LM, MP = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, true, exx, nmax)
+    if mix_lm
+        rho_R2, rho_dR, rho_rs_M, drho_rs_M_LM, MP  = get_rho_big(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2, lm_dict, dict_lm, big_code, gga, R) 
+
+    else
+        rho_R2, rho_dR, rho_rs_M, drho_rs_M_LM, MP = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, true, exx, nmax)
+    end
     println("MP")
     println(MP)
 
@@ -3059,7 +3270,11 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
             #MP_temp = MP[1]
             #MP .= 0.0
             #MP[1] = MP_temp
+            VH_LM_old = deepcopy(VH_LM)
             VH_LM, VTILDE = vhart_LM( sum(rho_dR, dims=2), D2, g, N, M, lmaxrho, lmax, MP*ex_factor, V_L,gbvals2, S, VECTS) #ex_factor*
+            println()
+            println("sum diff VH_LM ", sum(abs.(VH_LM - VH_LM_old)))
+            println()
             
         else
             VH_LM = zeros(N-1,N-1,lmaxrho+1, lmaxrho*2+1)
@@ -3076,7 +3291,14 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
         @time if exx > 1e-12
             #            println("calculating exact exchange")
             #VX_LM = vxx_LM( psipsi, D2, g, N, M, lmaxrho, lmax, MP, V_L,gbvals2, exx, nmax, nspin, filling, VECTS, S, sum(rho_dR, dims=2))
-            vxx_LM5(VX_LM, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbvals2, exx, nspin, filling, VECTS, S, hf_sym, R5)
+            VX_LM_old = deepcopy(VX_LM)
+            if mix_lm
+                vxx_LM5_big(VX_LM, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbvals2, exx, nspin, filling, VECTS, S, hf_sym, R5, big_code, lm_dict)
+            else
+                vxx_LM5(VX_LM, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbvals2, exx, nspin, filling, VECTS, S, hf_sym, R5)
+            end
+            println("sum abs.(VX_LM) ", sum(abs.(VX_LM)))
+            println("sum diff VX_LM ", sum(abs.(VX_LM - VX_LM_old)))
             #VX_LM = vxx_LM3( [], D2, g, N, M, lmaxrho, lmax, MP, V_L,gbvals2, exx, nmax, nspin, filling, VECTS, S, sum(rho_dR, dims=2))
 
         end
@@ -3091,23 +3313,25 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
 
         else
             #println("solve big time")            
-            VALS_BIG, VECTS_BIG, big_code = solve_big(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, funlist, lm_dict)
+            VALS_big, VECTS_new, big_code_new = solve_big(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, funlist, lm_dict, VECTS, VALS, exx, Sbig)
         end
 
 #        println("mix_lm ", mix_lm)
-        println("rho1")
-        @time if mix_lm == false
+#        println("rho1")
+#        @time if mix_lm == false
             #println("get rho small time")
-            rho_R2_new, rho_dR_new, rho_rs_M_new,  drho_rs_M_LM, MP_new = get_rho(VALS, VECTS_new, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga, exx, nmax)
+#            rho_R2_new, rho_dR_new, rho_rs_M_new,  drho_rs_M_LM, MP_new = get_rho(VALS, VECTS_new, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga, exx, nmax)
 
             
-        else
+#        else
             #println("get rho big time")
-            rho_R2_new, rho_dR_new, rho_rs_M_new, MP_new, drho_rs_M_LM  = get_rho_big(VALS, VALS_BIG, VECTS_BIG, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2, lm_dict, dict_lm, big_code, gga, R) 
-        end
+#            rho_R2_new, rho_dR_new, rho_rs_M_new, MP_new, drho_rs_M_LM  = get_rho_big(VALS, VALS_BIG, VECTS_new, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2, lm_dict, dict_lm, big_code, gga, R) 
+        #        end
 
         
         begin 
+#            rho_R2_old = deepcopy(rho_R2)
+
             #rho_R2 = rho_R2_new * mix + rho_R2 *(1-mix)
             #rho_dR = rho_dR_new * mix + rho_dR * (1-mix)
             #rho_rs_M = rho_rs_M_new * mix + rho_rs_M * (1-mix)
@@ -3119,14 +3343,37 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
             
  #           t2 = t2*mix + t2_new * (1-mix)
 
-            rho_R2_old = deepcopy(rho_R2)
-            mix_vects(VECTS, VECTS_new, mix, filling, S, nspin, lmax, N)
+
+            if mix_lm
+                println("VALS before l0 ", VALS[1:2, 1, 1,1])
+                println("VALS before l1 ", VALS[1:2, 1, 2,2])
+                
+                VECTS_old = deepcopy(VECTS)
+                big_code_old = deepcopy(big_code)
+                
+                mix_vects_big(VECTS, VECTS_new, mix, filling, Sbig, nspin, lmax, N, big_code, big_code_new, VALS, VALS_big)
+                println("VALS after l0 ", VALS[1:2, 1, 1,1])
+                println("VALS after l1 ", VALS[1:2, 1, 2,2])
+                println()
+                println("TEST VECTS ", sum(abs.(VECTS_old.^2 - VECTS.^2)))
+                for key in keys(big_code)
+                    println(key , " " , big_code_old[key] , " ",  big_code[key])
+                end
+                println()
+            else
+                mix_vects(VECTS, VECTS_new, mix, filling, S, nspin, lmax, N)
+            end                
             #VECTS = VECTS*mix + VECTS_new*(1-mix)
 
-
+            rho_R2_old = deepcopy(rho_R2)
 #            println("rho2")
-            #rho_R2, rho_dR, rho_rs_M,  drho_rs_M_LM, MP = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga, exx, nmax)
-            rho_R2, rho_dR, rho_rs_M,  drho_rs_M_LM, MP                = get_rho(VALS, VECTS    , nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga, exx, nmax)
+            if mix_lm == false
+                rho_R2, rho_dR, rho_rs_M,  drho_rs_M_LM, MP  = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga, exx, nmax)
+            else
+                rho_R2, rho_dR, rho_rs_M,  drho_rs_M_LM, MP  = get_rho_big(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2, lm_dict, dict_lm, big_code, gga, R) 
+            end                
+
+            #            rho_R2, rho_dR, rho_rs_M,  drho_rs_M_LM, MP                = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga, exx, nmax)
 
             println("test diff rho ", sum(abs.(rho_R2 - rho_R2_old)))
             
@@ -3149,6 +3396,9 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
         
     end
     println("done iters")
+
+    println("VALS after l0 ", VALS[1:2, 1, 1,1])
+    println("VALS after l1 ", VALS[1:2, 1, 2,2])
     
     display_eigs(VALS, nspin, lmax)
     println()
