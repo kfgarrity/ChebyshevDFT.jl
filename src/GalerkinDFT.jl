@@ -376,7 +376,31 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm)
             end
         end
     end
-    
+
+    hf_sym_big = zeros(lmax+1, lmax*2+1, lmax+1, lmax*2+1,lmax+1, lmax*2+1, lmax+1, lmax*2+1, lmax*2+1)
+    for l = 0:lmax
+        for m = -l:l
+            for la = 0:lmax
+                for ma = -la:la
+                    for l1 = 0:lmax
+                        for m1 = -l1:l1
+                            for l2 = 0:lmax
+                                for m2 = -l2:l2
+                                    for L = 0:lmax*2
+                                        ta = 0;
+                                        for MM = -L:L;
+                                            ta +=   4*pi/(2*L+1) * real_gaunt_dict[(L,MM,l,m,l1,m1)]*real_gaunt_dict[(L,MM,la,ma,l2,m2)]
+                                        end
+                                        hf_sym_big[l+1, m+l+1, la+1, ma+la+1, l1+1, l1+m1+1, l2+1, l2+m2+1, L+1] = ta
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
 
     mat_n2m = MAT_N2M(g, N=N, M=M)
     mat_m2n = MAT_M2N(g, N=N, M=M)
@@ -444,7 +468,7 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm)
         
     
     
-    return Z, nel, filling, nspin, lmax, V_C, V_L,D1, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga, LEB, R, gbvals2, nmax, hf_sym, mat_n2m, mat_m2n, R5, LINOP, lm_dict, dict_lm, big_code, Sbig
+    return Z, nel, filling, nspin, lmax, V_C, V_L,D1, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga, LEB, R, gbvals2, nmax, hf_sym, hf_sym_big,mat_n2m, mat_m2n, R5, LINOP, lm_dict, dict_lm, big_code, Sbig
     
 end
 
@@ -2150,11 +2174,11 @@ function vxx_LM5(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbv
 end
 
 
-function vxx_LM5_big(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbvals2, exx, nspin, filling, VECTS, S, hf_sym, R5, big_code, lm_dict)
+function vxx_LM5_big(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbvals2, exx, nspin, filling, VECTS, S, hf_sym_big, R5, big_code, lm_dict)
 
     VX_LM2 .= 0.0
 
-    MP_x = zeros(lmax*2+1)
+    #    MP_x = zeros(lmax*2+1)
 
     temp = zeros(N-1,N-1)
 
@@ -2163,8 +2187,14 @@ function vxx_LM5_big(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax,
     t = zeros(M+1)
     tf1 = zeros(M+1)
     mt = zeros(N-1, M+1)
+
+    ta = zeros(M+1)
+    tf1a = zeros(M+1)
+    mta = zeros(N-1, M+1)
+
     #mt1 = zeros(N-1, M+1)
     mt1 = zeros(N-1)
+    mt1a = zeros(N-1)
 
     RMAT = []
     for L = 0:lmax*2
@@ -2185,42 +2215,74 @@ function vxx_LM5_big(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax,
                         for m = -l:l
                             
                             ind = (1:(N-1)) .+ (N-1)*lm_dict[(l,m)]
-                    
+
+                            temptemp = VECTS[ind,n,spin]' * S * VECTS[ind,n,spin]
+                            if abs(temptemp) > 1e-8
+                                println("VECT $spin, n $n_count $n, $lX $mX, $l $m ", temptemp, " ind $ind")
+                            end
+                            
+                            if abs.(VECTS[ind,n,spin]' * S * VECTS[ind,n,spin]) < 1e-10
+                                continue
+                            end
+                            
                             t .= real(mat_n2m*(@view VECTS[ind,n,spin]))
                             tf1 .=  t ./ R  / sqrt(g.b-g.a) * sqrt(2 )
                             mt .= mat_n2m'*diagm(tf1)
 
-                            MP_x .= 0.0
+                                
+#                            for la = [l]
+#                                for ma = [m]
                             
-                            for L = 0:lmax*2
-                                
-                                MP_x[L+1] = f * sum( ( t.*conj(t) .*R.^L .* g.w[2:M+2,M])) / (2*L +1)
-                            end
+                            for la = 0:(lmax)
+                                for ma = -la:la
+                                    #la = l
+                                    #ma = m
+
+                                    inda = (1:(N-1)) .+ (N-1)*lm_dict[(la,ma)]
+
+                                    if abs.(VECTS[inda,n,spin]' * S * VECTS[inda,n,spin]) < 1e-10
+                                        continue
+                                    end
+
+                                    
+                                    #println("spin $spin, x $lX $mX, n ($n, $n_count), $l $m $la $ma      ", round(VECTS[ind,n,spin]'*S * VECTS[inda,n,spin], digits=5)  )
+                                    
+                                    ta .= real(mat_n2m*(@view VECTS[inda,n,spin]))
+                                    tf1a .=  ta ./ R  / sqrt(g.b-g.a) * sqrt(2 )
+                                    mta .= mat_n2m'*diagm(tf1a)
+                                    
+                                    #                            MP_x .= 0.0
+                                    
+                                    #                            for L = 0:lmax*2
+                                    #                                
+                                    #                                MP_x[L+1] = f * sum( ( t.*conj(t) .*R.^L .* g.w[2:M+2,M])) / (2*L +1)
+                                    #                            end
 
 
-                            for L =  0:lmax*2
+                                    for L =  0:lmax*2
 
 
-                                temp .=  mt * LINOP[L] * mt' *( (2*L+1)*f/2.0 ) #+ MATL 
-
-                                MATL .= real(RMAT[L+1]*VECTS[ind,n,spin]*(RMAT[L+1]*VECTS[ind,n,spin])') * f / g.b^L / g.b^(L+1) * sqrt(pi)/(2*pi) * sqrt(4*pi) * (2*L+1)^2
-                                
-                                for l1 = 0:lmax
-                                    for m1 = -l1:l1
-                                        for l2 = 0:lmax
-                                            for m2 = -l2:l2
-                                                ta = hf_sym[l+1, l+m+1,l1+1,m1+l1+1,l2+1,m2+l2+1, L+1]
-                                                for ii = 1:N-1
-                                                    for jj = 1:N-1
-                                                        #                                                VX_LM2[ii,jj,spin,l1+1,m1+l1+1,l2+1,m2+l2+1] += -ta*(temp[ii,jj])
-                                                        VX_LM2[ii,jj,spin,l1+1,m1+l1+1,l2+1,m2+l2+1] += -ta*temp[ii,jj] - ta*MATL[ii,jj] #* pi^L #/7.9314220444898185 
+                                        temp .=  mt * LINOP[L] * mta' *( (2*L+1)*f/2.0 ) #+ MATL 
+                                        
+                                        MATL .= real(RMAT[L+1]*VECTS[ind,n,spin]*(RMAT[L+1]*VECTS[inda,n,spin])') * f / g.b^L / g.b^(L+1) * sqrt(pi)/(2*pi) * sqrt(4*pi) * (2*L+1)^2
+                                        
+                                        for l1 = 0:lmax
+                                            for m1 = -l1:l1
+                                                for l2 = 0:lmax
+                                                    for m2 = -l2:l2
+                                                        tb = hf_sym_big[l+1, l+m+1,la+1, la+ma+1,l1+1,m1+l1+1,l2+1,m2+l2+1, L+1]
+                                                        for ii = 1:N-1
+                                                            for jj = 1:N-1
+                                                                #                                                VX_LM2[ii,jj,spin,l1+1,m1+l1+1,l2+1,m2+l2+1] += -ta*(temp[ii,jj])
+                                                                VX_LM2[ii,jj,spin,l1+1,m1+l1+1,l2+1,m2+l2+1] += -tb*temp[ii,jj] - tb*MATL[ii,jj] #* pi^L #/7.9314220444898185 
+                                                            end
+                                                        end
                                                     end
                                                 end
                                             end
                                         end
                                     end
                                 end
-                                
                             end
                         end
                     end
@@ -2228,19 +2290,21 @@ function vxx_LM5_big(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax,
             end
         end
     end
-
     
     t1 = zeros(N-1,N-1)
     t2 = zeros(N-1,N-1)
-    
+   
     for spin = 1:nspin
         for l1 = 0:lmax
             for m1 = -l1:l1
                 for l2 = 0:lmax
                     for m2 = -l2:l2
+                        
+
                         t1 .= (@view VX_LM2[:,:,spin,l1+1,m1+l1+1,l2+1,m2+l2+1])
                         t2 .= (@view VX_LM2[:,:,spin,l2+1,m2+l2+1,l1+1,m1+l1+1])
-#                        println("t1t2 spin $spin,  $l1 $m1,  $l2 $m2    ", sum(abs.(t1 - t2)), "     diff     " , sum(abs.(t1 - t2')), "     tot      ", sum(abs.(t1)))
+
+                        println("t1t2 spin $spin,  $l1 $m1,  $l2 $m2    ", sum(abs.(t1 - t2)), "     diff     " , sum(abs.(t1 - t2')), "     tot      ", sum(abs.(t1)))
                         VX_LM2[:,:,spin,l1+1,m1+l1+1,l2+1,m2+l2+1] .= 0.5*(t1 + t2')
                         VX_LM2[:,:,spin,l2+1,m2+l2+1,l1+1,m1+l1+1] .= 0.5*(t1' + t2)
                     end
@@ -2248,6 +2312,8 @@ function vxx_LM5_big(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax,
             end
         end
     end    
+
+                        
     
     if nspin == 1
         VX_LM2 .= VX_LM2 * exx/2.0
@@ -2829,7 +2895,8 @@ function solve_small(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho
                         #VLM += 4*pi*VX_LM[:,:,spin, l+1,l+m+1]/(4*pi)
 #                        VLM_old = deepcopy(VLM)
                         VLM += VX_LM[:,:,spin, l+1,l+m+1, l+1, l+m+1]
-#                        println("size VLM_old ", size(VLM_old ), " size VX ", size(VX_LM[:,:,spin, l+1,l+m+1, l+1, l+m+1]))
+
+                        #                        println("size VLM_old ", size(VLM_old ), " size VX ", size(VX_LM[:,:,spin, l+1,l+m+1, l+1, l+m+1]))
 #                        println("sum abs  XX $l $m  ", sum(abs.( VX_LM[:,:,spin, l+1,l+m+1, l+1, l+m+1])))
 #                        println("vh vx diff $l $m  ", sum(abs.(VX_LM[:,:,spin, l+1,l+m+1, l+1, l+m+1] - VLM_old)), " VH_tot $VLM_old VX $(VX_LM[:,:,spin, l+1,l+m+1, l+1, l+m+1]) ")
                         #println("vh vx div ", VX_LM[1:2,1:2,spin, l+1,l+m+1, l+1, l+m+1] ./ (VLM_old[1:2,1:2] .+ 1e-20))
@@ -2860,7 +2927,7 @@ function solve_small(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho
 end
 
 
-function solve_big(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, funlist, lm_dict, VECTS, VALS,exx, Sbig)
+function solve_big(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, funlist, lm_dict, VECTS, VALS,exx, Sbig, symmetry_list)
 
     VLM = zeros(size(V_C))
 
@@ -2872,6 +2939,9 @@ function solve_big(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, 
     Hbig = zeros(Nsmall * c, Nsmall * c)
 #    Sbig = zeros(Nsmall * c, Nsmall * c)
 
+    Hh = Hermitian(Hbig)
+    Sh = Hermitian(Sbig)
+    
     N = Nsmall * c
 
     VECTS_BIG = zeros(Float64, N,N,nspin)
@@ -2885,7 +2955,7 @@ function solve_big(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, 
     for spin = 1:nspin
         Hbig .= 0.0
 #        Sbig .= 0.0
-
+        println()
         for l = 0:(lmax)
             for m = -l:l
                 ind1 = (1:Nsmall) .+ Nsmall*lm_dict[(l,m)]
@@ -2926,13 +2996,15 @@ function solve_big(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, 
                             if exx > 1e-12
                                 VLM += VX_LM[:,:,spin, l+1,l+m+1, l2+1, l2+m2+1]
                             end
-                            println("sum abs $l $m   $l2 $m2   ", sum(abs.(VLM)))
+#                            if abs( sum(abs.(VLM))) > 1e-10
+#                                println("$spin sum abs $l $m   $l2 $m2   ", sum(abs.(VLM)))
+#                            end
                             Hbig[ind1,ind2] +=  VLM
                             
                         end
-#                        if sum(abs.(Hbig[ind1,ind2])) > 1e-10
-#                            println("HAM $spin $l $m $l2 $m2 ", sum(abs.(Hbig[ind1,ind2])))
-#                        end
+                        if sum(abs.(Hbig[ind1,ind2])) > 1e-6
+                            println("HAM $spin,   $l $m,  $l2 $m2 ", sum(abs.(Hbig[ind1,ind2])))
+                        end
                         #println("eigen")
                         #                        vals, vects = eigen(D2 + V + VLM, S)
                         #                        VECTS[:,:,spin, l+1, l+1+m] = vects
@@ -2942,31 +3014,103 @@ function solve_big(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, 
             end
             
         end
-        #        println("sum check ", sum(Hbig - Hbig'), " ", sum(Sbig - Sbig'))
-        #        println("eigen big")
+        println("sum check ", sum(Hbig - Hbig'), " ", sum(Sbig - Sbig'))
+        println("eigen big")
 
         #println("herm")
         begin
             Hh = Hermitian(Hbig)
             Sh = Hermitian(Sbig)
         end
+
+        n = length(lm_dict)
+        println("n $n")
+
+
+
+        #        if ismissing(symmetry_list)
+        #
+        symmetry_list = zeros(Bool, n,n)
+        for n1 = 1:n
+            for n2 = 1:n
+#                println("n1 $n1 n2 $n2 ", (1:(Nsmall)) .+ (n1-1)*(Nsmall), " x ", (1:(Nsmall)) .+ (n2-1)*(Nsmall))
+                
+                if maximum(abs.(Hbig[ (1:(Nsmall)) .+ (n1-1)*(Nsmall), (1:(Nsmall)) .+ (n2-1)*(Nsmall)])) > 1e-6
+                    symmetry_list[n1, n2] = 1
+                end
+            end
+        end
+        #        end
+
+        println("symmetry_list")
+        println(symmetry_list)
+
+        println("Nsmall $Nsmall")
+        if true
+            done_list = []
+            VALS_LIST = []
+            VECTS_LIST = []
+            counter = 0
+            for nstart = 1:n
+                println("nstart $nstart")
+                if nstart in done_list
+                    continue
+                end
+                ind = symmetry_list[nstart,:]
+
+                indind = Int64[]
+                for ii = (1:n)[ind]
+                    for i = 1:(Nsmall)
+                        push!(indind, i+(ii-1)*(Nsmall))
+                    end
+                end
+                println("indind ", indind)
+                
+                Hht = Hermitian(Hbig[indind,indind])
+                Sht = Hermitian(Sbig[indind,indind])
+
+                vals, vects = eigen(Hht, Sht)
+
+                VALS_BIG[1+counter:counter+length(indind) ,spin] = vals
+                VECTS_BIG[indind,1+counter:counter+length(indind),spin] =vects[:,:]
+                counter += length(indind)
+
+                println("counter $counter")
+                
+                for i in (1:n)[ind]
+                    push!(done_list, i)
+                end
+                println("$nstart, donelist ", done_list)
+                
+            end
+            println("counter final , ",  counter)
+        end                    
+
         
         #println("eig")
-        vals, vects = eigen(Hh, Sh)
 
-        println("HAMTEST spin $spin h ", sum(abs.(Hh)), " s ", sum(abs.(Sh)))
+
+        #vals, vects = eigen(Hh, Sh)
+
+        #println("HAMTEST spin $spin h ", sum(abs.(Hh)), " s ", sum(abs.(Sh)))
         
         println("stuff")
         begin
-            VALS_BIG[:,spin] = vals
-            VECTS_BIG[:,:,spin] =vects
+
+            indperm = sortperm(VALS_BIG[:,spin])
+            VALS_BIG[:,spin] = VALS_BIG[indperm,spin]
+            VECTS_BIG[:,:,spin] = VECTS_BIG[:,indperm,spin]
+
+#            VALS_BIG[:,spin] = vals
+#            VECTS_BIG[:,:,spin] =vects
             
             COUNT = zeros(lmax+1, 2*lmax+1)
             
-            Sv = Sh*vects
+            Sv = Sh*VECTS_BIG[:,:,spin]
         end
 
         #println("sort vals")
+        vects = VECTS_BIG[:,:,spin]
         for n = 1:(N-1)
             tmax = 0.0
             l_m = 0
@@ -3003,7 +3147,7 @@ function solve_big(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, 
         
     end
     
-    return VALS_BIG, VECTS_BIG, big_code
+    return VALS_BIG, VECTS_BIG, big_code, Hh, Sh, symmetry_list
     
 end
 
@@ -3203,12 +3347,15 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     
     
    # println("time prepare")
-    Z, nel, filling, nspin, lmax, V_C, V_L, D1, D2, S, invsqrtS, invS, VECTS_start, VALS, funlist, gga, LEB, R, gbvals2, nmax, hf_sym, mat_n2m, mat_m2n, R5, LINOP, lm_dict, dict_lm, big_code, Sbig = prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm)
+    Z, nel, filling, nspin, lmax, V_C, V_L, D1, D2, S, invsqrtS, invS, VECTS_start, VALS, funlist, gga, LEB, R, gbvals2, nmax, hf_sym, hf_sym_big, mat_n2m, mat_m2n, R5, LINOP, lm_dict, dict_lm, big_code, Sbig = prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm)
     if ismissing(VECTS)
         VECTS = VECTS_start
     end
 
-
+    symmetry_list = missing
+    
+    Hh = missing
+    Sh = missing
     
     println("lmaxrho $lmaxrho")
     
@@ -3293,7 +3440,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
             #VX_LM = vxx_LM( psipsi, D2, g, N, M, lmaxrho, lmax, MP, V_L,gbvals2, exx, nmax, nspin, filling, VECTS, S, sum(rho_dR, dims=2))
             VX_LM_old = deepcopy(VX_LM)
             if mix_lm
-                vxx_LM5_big(VX_LM, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbvals2, exx, nspin, filling, VECTS, S, hf_sym, R5, big_code, lm_dict)
+                vxx_LM5_big(VX_LM, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbvals2, exx, nspin, filling, VECTS, S, hf_sym_big, R5, big_code, lm_dict)
             else
                 vxx_LM5(VX_LM, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbvals2, exx, nspin, filling, VECTS, S, hf_sym, R5)
             end
@@ -3313,7 +3460,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
 
         else
             #println("solve big time")            
-            VALS_big, VECTS_new, big_code_new = solve_big(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, funlist, lm_dict, VECTS, VALS, exx, Sbig)
+            VALS_big, VECTS_new, big_code_new, Hh, Sh,symmetry_list = solve_big(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, funlist, lm_dict, VECTS, VALS, exx, Sbig ,symmetry_list)
         end
 
 #        println("mix_lm ", mix_lm)
@@ -3404,7 +3551,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     println()
 
     #    println("size rho_rs_M", size(rho_rs_M))
-    return VALS, VECTS, rho_R2, VH_LM , VXC_LM, VX_LM, rho_rs_M, drho_rs_M_LM, vxc_tp, VSIGMA_tp, VTILDE, R
+    return VALS, VECTS, rho_R2, Hh, Sh
     
 end #end dft
 
