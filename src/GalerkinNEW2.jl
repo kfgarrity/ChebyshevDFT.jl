@@ -479,9 +479,9 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP, gbvals2; M = -1)
     for n1 = 1:N-1
         vh_tilde_vec += g.bvals[2:M+2,n1,M] * vh_tilde[n1]
     end
-    if abs(MP[l+1, m+l+1]) > 1e-6
-        println("MP vh $l $m ", MP[l+1, m+l+1])
-    end
+#    if abs(MP[l+1, m+l+1]) > 1e-6
+#        println("MP vh $l $m ", MP[l+1, m+l+1])
+#    end
     
     if true
         if l == 0

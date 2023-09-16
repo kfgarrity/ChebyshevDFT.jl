@@ -39,10 +39,12 @@ end
 
 real_gaunt_dict = Dict{NTuple{6,Int64}, Float64}()
 
+real_gaunt_arr = zeros(14+1, 2*14+1, 6+1, 6*2+1, 6+1, 6*2+1)
+
 
 function makeleb(n; lmax = 12 )
 
-    println("makeleb")
+#    println("makeleb")
 
     
     if n == 0 || n == 1 #special case
@@ -90,7 +92,7 @@ function makeleb(n; lmax = 12 )
     θ, ϕ, w = get_tp(x,y,z, w)
 
     N = length(w)
-    println("Lebedev integration order $n , length $N")
+#    println("Lebedev integration order $n , length $N")
     
     #println("length tp ", length(θ), " ", length(ϕ))
     
@@ -370,15 +372,16 @@ function fill_gaunt(;lmax=4, lmax_rho=12, n=23)
     end
             
     
-    
 #    return data_reshape
-    for l1 = 0:lmax_rho
+    @inbounds for l1 = 0:lmax_rho
         for m1 = -l1:l1
             for l2 = 0:lmax
                 for m2 = -l2:l2
                     for l3 = 0:lmax
                         for m3 = -l3:l3
-                            @inbounds real_gaunt_dict[(l1,m1,l2,m2,l3,m3)] = sum(data_reshape[(l1,m1)].*data_reshape[(l2,m2)].*data_reshape[(l3,m3)].*l.w)*4*pi
+                            temp = sum(data_reshape[(l1,m1)].*data_reshape[(l2,m2)].*data_reshape[(l3,m3)].*l.w)*4*pi
+                            real_gaunt_dict[(l1,m1,l2,m2,l3,m3)] = temp
+                            real_gaunt_arr[l1+1,l1+m1+1,l2+1,l2+m2+1,l3+1,l3+m3+1] = temp
                         end
                     end
                 end
