@@ -51,6 +51,78 @@ using ..AngularIntegration:real_gaunt_arr
 using ..AngularIntegration:makeleb
 using JLD
 
+function calc_energy(rho_rs_M_LM, EXC_LM, funlist, g, N, M, R, Vin, filling, vals, VH, Z)
+
+    e_vxc = 0.0
+    if funlist != :hydrogen && funlist != :none
+        e_vxc = calc_energy_vxc(rho_rs_M_LM, EXC_LM, g, N, M, R)
+    end
+    
+    println("------------------------------------")
+    println("ENERGY XC FUN:  $e_vxc")
+    e_hart = 0.0
+    if funlist != :hydrogen 
+        e_hart = calc_energy_vh(rho_rs_M_LM, VH , g, N, M, R)
+    end
+    
+    println("ENERGY HARTREE: $e_hart")
+    e_exx = 0.0
+    println("ENERGY EXX:     $e_exx")
+    e_ke = 0.0
+    e_ke = calc_energy_ke(rho_rs_M_LM, Vin , g, N, M, R, filling, vals)
+    println("ENERGY KINETIC: $e_ke")
+    e_nuc = 0.0
+    e_nuc = calc_energy_nuc(rho_rs_M_LM, Z , g, N, M, R)
+    println("ENERGY NUCLEAR: $e_nuc")
+    println()
+    etot = e_vxc+e_hart+e_exx+e_ke+e_nuc
+    println("ETOT:           $etot")
+    println("------------------------------------")
+    
+    return etot, e_vxc, e_hart, e_exx, e_ke, e_nuc
+end
+
+function calc_energy_vxc(rho_rs_M_LM, EXC_LM, g, N, M, R)
+    
+    e_vxc = sum( sum(rho_rs_M_LM, dims=2)[:,:,:] .* EXC_LM.* g.w[2:M+2,M] .* R.^2  )  /sqrt(4*pi)/2 * (g.b - g.a)/2.0
+    #println("norm1 ", sum(rho_rs_M_LM[:,1,1,1] .* g.w[2:M+2,M] .* R.^2 ) .* (g.b - g.a)/2.0)
+    #println("norm2 ", sum(rho_rs_M_LM[:,2,1,1] .* g.w[2:M+2,M] .* R.^2 ) .* (g.b - g.a)/2.0)
+    #println("exc1 ", EXC_LM[1])
+    
+    #elda += 2*pi*sum(elda_LM[:,l,m].*rho_LM_tot[:,1,l,m].*rall.^2 .* wall)
+    return e_vxc
+    
+end
+
+function calc_energy_ke(rho_rs_M_LM, Vin , g, N, M, R, filling, vals)
+
+    KE = sum(filling .* vals)
+    #KE = 0.0
+    #    println("ke $KE")
+    nspin = size(rho_rs_M_LM, 2)
+    for spin = 1:nspin
+#        println("add ", -sum( sum( Vin[:,spin,:,:] .* rho_rs_M_LM[:,spin,:,:], dims=[2,3]) .*  g.w[2:M+2,M] .* R.^2)/ sqrt(4*pi)/2 * (g.b - g.a)/2.0)
+        KE += -sum( sum( Vin[:,spin,:,:] .* rho_rs_M_LM[:,spin,:,:], dims=[2,3]) .*  g.w[2:M+2,M] .* R.^2)/ sqrt(4*pi)/2 * (g.b - g.a)/2.0
+    end
+
+    #println("KE $KE sum ", sum(abs.( Vin[:,1,:,:])))
+    return KE 
+end
+
+function calc_energy_vh(rho_rs_M_LM, VH , g, N, M, R)
+
+    return 2.0*0.5*4*pi* sum((sum( sum(rho_rs_M_LM, dims=2)[:,:,:] .* VH, dims=[2,3]) .* g.w[2:M+2,M] .* R.^2  ))  /sqrt(4*pi)/2 * (g.b - g.a)/2.0
+    
+    ####return 0.5 * 4 * pi * sum(VH .* rho .* wall .* rall.^2 )
+    
+end
+
+function calc_energy_nuc(rho_rs_M_LM, Z , g, N, M, R)
+
+    return -Z * 4 * pi * sum(sum(rho_rs_M_LM[:,:,1,1], dims=2)  .* g.w[2:M+2,M] .* R)  /sqrt(4*pi)/2 * (g.b - g.a)/2.0 / sqrt(pi)
+    
+end
+
 function choose_exc(exc, nspin)
 
     
@@ -2408,7 +2480,8 @@ function vhart_LM(rho_dR, D2, g, N, M, lmaxrho, lmax, MP, V_L, gbvals2, S, VECTS
 
     #    println("size rho_dR ", size(rho_dR))
     #    println("lmax rho ", lmaxrho)
-    loopmax = min(lmax*2, lmaxrho)
+    #loopmax = min(lmax*2, lmaxrho)
+    loopmax = lmaxrho
     #loopmax = lmaxrho
     VH_LM = zeros(N-1, N-1, lmaxrho+1, 2*lmaxrho+1)
     VH_LM2 = zeros(N-1, N-1, lmaxrho+1, 2*lmaxrho+1)
@@ -2643,7 +2716,7 @@ function vxc_LM(rho_rs_M, drho_rs_M, g, M, N, funlist, gga, nspin, lmax, lmaxrho
         end
         
         VRHO_tp = zeros( M+1, nspin, LEB.N)
-        ERHO_tp = zeros( M+1, nspin, LEB.N)
+        ERHO_tp = zeros( M+1, LEB.N)
         
         
         loopmax = min(lmax*2, lmaxrho)
@@ -2693,13 +2766,25 @@ function vxc_LM(rho_rs_M, drho_rs_M, g, M, N, funlist, gga, nspin, lmax, lmaxrho
             vrho, vsigma, erho =  EXC_get_ve( (@view rho_rs_M[:,:, 1, 1]), (@view rho[:,1:nspin,ntp])/sqrt(4*pi)  , funlist, (@view drho[:,1:nspin,:,ntp])/sqrt(4*pi), theta, gga, R)
             VSIGMA_tp[:,:,ntp] = vsigma 
             VRHO_tp[:,:,ntp] = vrho
+            ERHO_tp[:,ntp] = erho
         else
             if nspin == 1
                 v = v_LDA.(rho[:, 1, ntp] * sqrt(4*pi)/ (4*pi))
                 VRHO_tp[:,1,ntp] = v
+                e = e_LDA.(rho[:, 1, ntp] * sqrt(4*pi)/ (4*pi))
+                ERHO_tp[:,ntp] = e
             elseif nspin == 2
                 v = v_LDA_sp.(rho[:, 1, ntp][:] * sqrt(4*pi)/ (4*pi) ,  rho[:, 2, ntp][:] * sqrt(4*pi)/ (4*pi))
                 VRHO_tp[:,1:2,ntp] = reshape(vcat(v...), nspin,M+1)'
+
+                r = rho[:,1,ntp] + rho[:,2,ntp]
+                ζ = (rho[:,1,ntp] - rho[:,2,ntp]) ./ r
+                
+                #                e = e_LDA_sp.( rho[:, 1, ntp][:] * sqrt(4*pi)/ (4*pi) ,  rho[:, 2, ntp][:] * sqrt(4*pi)/ (4*pi))
+
+                e = e_LDA_sp.( r * sqrt(4*pi)/ (4*pi) ,  ζ)
+                ERHO_tp[:,ntp] = e
+                
             else
                 println("nspin must be 1 or 2 : $nspin")
             end
@@ -2737,6 +2822,7 @@ function vxc_LM(rho_rs_M, drho_rs_M, g, M, N, funlist, gga, nspin, lmax, lmaxrho
         dvsigma_theta = zeros(M+1, nind, nthreads())
         dvsigma_phi = zeros(M+1, nind, nthreads())
         VXC_tp = zeros( M+1, nspin, LEB.N, nthreads())
+        EXC_tp = zeros( M+1, LEB.N, nthreads())
     end
     
     #    EXC_tp = zeros( M+1, nspin, LEB.N)
@@ -2764,20 +2850,23 @@ function vxc_LM(rho_rs_M, drho_rs_M, g, M, N, funlist, gga, nspin, lmax, lmaxrho
             VXC_tp[:,:,ntp, id] += v
         else
             VXC_tp[:,:,ntp,id] += VRHO_tp[:,:,ntp]
+            EXC_tp[:,ntp,id] += ERHO_tp[:,ntp]
         end
 
     end
     VXC_tp = sum(VXC_tp, dims=4)
+    EXC_tp = sum(EXC_tp, dims=3)
     
     
     
     #now transform to LM space again
     #println("VXC to LM")
     VXC_LM = zeros(M+1, nspin, lmaxrho+1, 2*lmaxrho+1)
-    for spin = 1:nspin
-        for l = 0:2:lmaxrho
-            for m = -l:l
-                @tturbo for r = 1:M+1
+    EXC_LM = zeros(M+1, lmaxrho+1, 2*lmaxrho+1)
+    for l = 0:2:lmaxrho
+        for m = -l:l
+            @tturbo for spin = 1:nspin
+                for r = 1:M+1
                     for ind = 1:LEB.N
                         VXC_LM[r, spin, l+1, l+m+1] +=  4*pi*LEB.Ylm[(l,m)][ind] * VXC_tp[r,spin,ind] * LEB.w[ind]
                     end
@@ -2786,6 +2875,16 @@ function vxc_LM(rho_rs_M, drho_rs_M, g, M, N, funlist, gga, nspin, lmax, lmaxrho
         end
     end
 
+    for l = 0:2:lmaxrho
+        for m = -l:l
+       @tturbo      for r = 1:M+1
+                for ind = 1:LEB.N
+                    EXC_LM[r, l+1, l+m+1] +=  4*pi*LEB.Ylm[(l,m)][ind] * EXC_tp[r,ind] * LEB.w[ind]
+                end
+            end
+        end
+    end
+    
 
     #VXC_LM = VXC_LM #/ sqrt(4*pi)
 
@@ -2800,9 +2899,9 @@ function vxc_LM(rho_rs_M, drho_rs_M, g, M, N, funlist, gga, nspin, lmax, lmaxrho
             end
         end
     end
-    EXC_tp = zeros(N-1,N-1,nspin, lmaxrho+1, 2*lmaxrho+1)
+    #    EXC_tp = zeros(N-1,N-1,nspin, lmaxrho+1, 2*lmaxrho+1)
     
-    return VXC_LM_MAT, VXC_tp, EXC_tp, VSIGMA_tp
+    return VXC_LM_MAT, VXC_tp, EXC_tp, VSIGMA_tp, EXC_LM , VXC_LM
     
 end
 
@@ -3370,7 +3469,16 @@ end
 
 function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters = 50, mix = 0.5, mixing_mode=:pulay, exc = missing, lmax = missing, conv_thr = 1e-7, lmaxrho = 0, mix_lm = false, exx = 0.0, VECTS=missing)
 
-    if M == -1
+    if M > g.M
+        M = g.M
+        println("warning, M too large, set to $M")
+    end
+    if N > g.N
+        N = g.N
+        println("warning, N too large, set to $N")
+    end
+    
+    if M == -1 
         M = g.M
     end
     if N == -1
@@ -3427,10 +3535,14 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     VX_LM = zeros(N-1,N-1,nspin, l2+1, l2*2+1, l2+1, l2*2+1)
     #VX_LM = zeros(1)
     VXC_LM = zeros(N-1,N-1,nspin, lmaxrho+1, lmaxrho*2+1)
+
+    Vin = zeros(M+1,nspin, lmaxrho+1, lmaxrho*2+1)
     
 
     vxc_tp = zeros(M+1,nspin, lmaxrho+1, lmaxrho*2+1)
     VSIGMA_tp = zeros(M+1,3, lmaxrho+1, lmaxrho*2+1)
+
+    EXC_LM = zeros(M+1, lmaxrho+1, lmaxrho*2+1)
                    
 #    println("iters")
 #    H1 = missing
@@ -3446,11 +3558,17 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
 #    println()
 #    println("NEL $nel exx $exx ex_factor $ex_factor")
 #    println()
-    loopmax = min(lmax, lmaxrho)
-    VTILDE = zeros(N-1,  loopmax, loopmax*2+1)
+    loopmax = lmaxrho
+    VTILDE = zeros(M+1,  loopmax, loopmax*2+1)
 
     for iter = 1:niters
 
+        Vin .= 0.0
+        Vin[:,1,1,1] = -Z ./ R * 4 *pi / sqrt(pi) 
+        if nspin == 2
+            Vin[:,2,1,1] = -Z ./ R * 4 *pi / sqrt(pi) 
+        end
+        
         VALS_1[:,:,:,:] = VALS
 
 #        println("iter $iter")
@@ -3462,7 +3580,13 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
             #MP[1] = MP_temp
             VH_LM_old = deepcopy(VH_LM)
             VH_LM, VTILDE = vhart_LM( sum(rho_dR, dims=2), D2, g, N, M, lmaxrho, lmax, MP*ex_factor, V_L,gbvals2, S, VECTS) #ex_factor*
-#            println()
+
+            println("vtilde ", 4 * pi * VTILDE[1])
+            Vin[:,1,:,:] += 4 * pi * VTILDE * 2.0 
+            if nspin == 2
+                Vin[:,2,:,:] += 4 * pi * VTILDE * 2.0
+            end            
+            #            println()
 #            println("sum diff VH_LM ", sum(abs.(VH_LM - VH_LM_old)))
 #            println()
             
@@ -3472,7 +3596,11 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
 
         #println("vxc")
         if funlist != :none && funlist != :hydrogen
-            VXC_LM, vxc_tp, exc_tp, VSIGMA_tp = vxc_LM( rho_rs_M, drho_rs_M_LM, g, M, N, funlist, gga, nspin, lmax, lmaxrho, LEB, R, invS, gbvals2)
+            VXC_LM, vxc_tp, exc_tp, VSIGMA_tp, EXC_LM, VXC_LM_M = vxc_LM( rho_rs_M, drho_rs_M_LM, g, M, N, funlist, gga, nspin, lmax, lmaxrho, LEB, R, invS, gbvals2)
+
+            println("VXC_LM_M ", VXC_LM_M[1])
+            Vin += VXC_LM_M * 2.0
+            
         end
 
         #println("vxx")
@@ -3588,6 +3716,10 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     display_eigs(VALS, nspin, lmax)
     println()
 
+    
+    calc_energy(rho_rs_M, EXC_LM, funlist, g, N, M, R, Vin, filling, VALS, VTILDE, Z)
+    println()
+    
     #    println("size rho_rs_M", size(rho_rs_M))
     return VALS, VECTS, rho_R2, Hh, Sh
     

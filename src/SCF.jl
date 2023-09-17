@@ -382,6 +382,7 @@ function calc_energy_ke_LM(rho_LM, N, Rmax, rall, wall, filling, vals_r, Vin)
 #    println("vals")
 #    println(vals_r)
     
+#    KE = 0.0
     KE = sum(filling .* vals_r)
 #    println("KE start $KE")
     for l = 1:size(rho_LM)[3]
@@ -420,7 +421,15 @@ function calc_energy_lda_LM(rho_LM, drho_LM, N, Rmax, rall, wall, D1Xgrid; nspin
             elda += 2*pi*sum(elda_LM[:,l,m].*rho_LM_tot[:,1,l,m].*rall.^2 .* wall)
         end        
     end
-
+    println("TEST NORM")
+    norm = 0.0
+    for l = 1:size(rho_LM)[3]
+        for m = 1:size(rho_LM)[4]
+            norm += sum(rho_LM_tot[:,1,l,m].*rall.^2 .* wall)
+        end        
+    end
+    println("norm $norm exc1 ", elda_LM[1])
+    
     return elda
     
 end
@@ -1617,13 +1626,15 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
         
         Vtot .= 0.0
 
+        println("vlda_LM ", vlda_LM[1])
+        println("VH_LM ", 4*pi*VH_LM[1])
         
         if hydrogen == false
             Vtot[:,1,:,:] .= (4*pi*VH_LM[:,:,:]  + vlda_LM[:,1,:,:] ) 
         end
         
         
-        Vtot[2:N,1, 1,1] += diag(Vc) * sqrt(4*pi)
+        Vtot[2:N,1, 1,1] += diag(Vc) * sqrt(4*pi) 
         if !ismissing(vext)
             Vtot[2:N,1, 1,1] += VEXT[2:N] * sqrt(4*pi)
         end
@@ -1631,10 +1642,10 @@ function DFT_spin_l_grid_LM(; fill_str=missing, N = 40, Z=1.0, Rmax = 10.0, rho_
 
         if nspin == 2             
             if hydrogen == false
-                Vtot[:,2,:,:] .= (4*pi*VH_LM[:, :,:]  + vlda_LM[:,2,:,:])
+                Vtot[:,2,:,:] .= (4*pi*VH_LM[:, :,:]  + vlda_LM[:,2,:,:]) 
             end
             
-            Vtot[2:N,2, 1,1] += diag(Vc) * sqrt(4*pi)
+            Vtot[2:N,2, 1,1] += diag(Vc) * sqrt(4*pi) 
         end
         if !ismissing(vext) && nspin == 2
             Vtot[2:N,2, 1,1] += VEXT[2:N] * sqrt(4*pi)
