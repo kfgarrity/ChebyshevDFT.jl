@@ -51,7 +51,7 @@ using ..AngularIntegration:real_gaunt_arr
 using ..AngularIntegration:makeleb
 using JLD
 
-function calc_energy(rho_rs_M_LM, EXC_LM, funlist, g, N, M, R, Vin, filling, vals, VH, Z)
+function calc_energy(rho_rs_M_LM, EXC_LM, funlist, g, N, M, R, Vin, filling, vals, VH, Z, VX_LM, lmax, VECTS, exx, mix_lm, nspin, big_code, lm_dict)
 
     e_vxc = 0.0
     if funlist != :hydrogen && funlist != :none
@@ -67,9 +67,12 @@ function calc_energy(rho_rs_M_LM, EXC_LM, funlist, g, N, M, R, Vin, filling, val
     
     println("ENERGY HARTREE: $e_hart")
     e_exx = 0.0
+    if exx > 1e-12
+        e_exx = calc_energy_exx(VX_LM, VECTS, filling, g, N, M, mix_lm, lmax, nspin, big_code, lm_dict)
+    end
     println("ENERGY EXX:     $e_exx")
     e_ke = 0.0
-    e_ke = calc_energy_ke(rho_rs_M_LM, Vin , g, N, M, R, filling, vals)
+    e_ke = calc_energy_ke(rho_rs_M_LM, Vin , g, N, M, R, filling, vals, e_exx)
     println("ENERGY KINETIC: $e_ke")
     e_nuc = 0.0
     e_nuc = calc_energy_nuc(rho_rs_M_LM, Z , g, N, M, R)
@@ -83,8 +86,8 @@ function calc_energy(rho_rs_M_LM, EXC_LM, funlist, g, N, M, R, Vin, filling, val
 end
 
 function calc_energy_vxc(rho_rs_M_LM, EXC_LM, g, N, M, R)
-    
-    e_vxc = sum( sum(rho_rs_M_LM, dims=2)[:,:,:] .* EXC_LM.* g.w[2:M+2,M] .* R.^2  )  /sqrt(4*pi)/2 * (g.b - g.a)/2.0
+    a,nspin,lmax1,mmax1 = size(rho_rs_M_LM)
+    e_vxc = sum( sum(rho_rs_M_LM, dims=2)[:,1,:,:] .* EXC_LM[:,1:lmax1,1:mmax1].* g.w[2:M+2,M] .* R.^2  )  /sqrt(4*pi)/2 * (g.b - g.a)/2.0
     #println("norm1 ", sum(rho_rs_M_LM[:,1,1,1] .* g.w[2:M+2,M] .* R.^2 ) .* (g.b - g.a)/2.0)
     #println("norm2 ", sum(rho_rs_M_LM[:,2,1,1] .* g.w[2:M+2,M] .* R.^2 ) .* (g.b - g.a)/2.0)
     #println("exc1 ", EXC_LM[1])
@@ -94,7 +97,7 @@ function calc_energy_vxc(rho_rs_M_LM, EXC_LM, g, N, M, R)
     
 end
 
-function calc_energy_ke(rho_rs_M_LM, Vin , g, N, M, R, filling, vals)
+function calc_energy_ke(rho_rs_M_LM, Vin , g, N, M, R, filling, vals, e_exx)
 
     KE = sum(filling .* vals)
     #KE = 0.0
@@ -104,14 +107,14 @@ function calc_energy_ke(rho_rs_M_LM, Vin , g, N, M, R, filling, vals)
 #        println("add ", -sum( sum( Vin[:,spin,:,:] .* rho_rs_M_LM[:,spin,:,:], dims=[2,3]) .*  g.w[2:M+2,M] .* R.^2)/ sqrt(4*pi)/2 * (g.b - g.a)/2.0)
         KE += -sum( sum( Vin[:,spin,:,:] .* rho_rs_M_LM[:,spin,:,:], dims=[2,3]) .*  g.w[2:M+2,M] .* R.^2)/ sqrt(4*pi)/2 * (g.b - g.a)/2.0
     end
-
+    KE += e_exx * -2.0
     #println("KE $KE sum ", sum(abs.( Vin[:,1,:,:])))
     return KE 
 end
 
 function calc_energy_vh(rho_rs_M_LM, VH , g, N, M, R)
 
-    return 2.0*0.5*4*pi* sum((sum( sum(rho_rs_M_LM, dims=2)[:,:,:] .* VH, dims=[2,3]) .* g.w[2:M+2,M] .* R.^2  ))  /sqrt(4*pi)/2 * (g.b - g.a)/2.0
+    return 2.0*0.5*4*pi* sum((sum( sum(rho_rs_M_LM, dims=2)[:,1,:,:] .* VH, dims=[2,3]) .* g.w[2:M+2,M] .* R.^2  ))  /sqrt(4*pi)/2 * (g.b - g.a)/2.0
     
     ####return 0.5 * 4 * pi * sum(VH .* rho .* wall .* rall.^2 )
     
@@ -121,6 +124,61 @@ function calc_energy_nuc(rho_rs_M_LM, Z , g, N, M, R)
 
     return -Z * 4 * pi * sum(sum(rho_rs_M_LM[:,:,1,1], dims=2)  .* g.w[2:M+2,M] .* R)  /sqrt(4*pi)/2 * (g.b - g.a)/2.0 / sqrt(pi)
     
+end
+
+function calc_energy_exx(VX_LM, VECTS, filling, g, N, M, mix_lm, lmax, nspin, big_code, lm_dict)
+
+    e_exx = 0.0
+    if mix_lm == false
+        for spin = 1:nspin
+            for l1 = 0:lmax
+                for m1 = -l1:l1
+                    v = VX_LM[:,:,spin, l1+1,l1+m1+1, l1+1, l1+m1+1]
+                    for n = 1:(N-1)
+                        f = filling[n,spin,l1+1,m1+l1+1]
+                        
+                        fillval = filling[n, spin, l1+1, l1+m1+1]
+                        if fillval < 1e-20
+                            break
+                        end
+                        e_exx += 0.5*fillval*VECTS[:,n,spin, l1+1, l1+m1+1]' * v *  VECTS[:,n,spin, l1+1, l1+m1+1]
+                    end
+                end
+            end
+        end                
+
+    else
+        Nsmall = N-1
+        for spin = 1:nspin
+            for l = 0:(lmax)
+                for m = -l:l
+                    nlist = big_code[(spin,l, m)]
+                    for (n_count, n_code) in enumerate(nlist)
+                        fillval = filling[n_count,spin,l+1,m+l+1]
+                        if fillval < 1e-20
+                            continue
+                        end
+                        for l1 = 0:(lmax)
+                            for m1 = -l1:l1
+                                ind1 = (1:Nsmall) .+ Nsmall*lm_dict[(l1,m1)]
+                                for l2 = 0:(lmax)
+                                    for m2 = -l2:l2
+                                        ind2 = (1:Nsmall) .+ Nsmall*lm_dict[(l2,m2)]
+                                        v = VX_LM[:,:,spin, l1+1,l1+m1+1, l2+1, l2+m2+1]
+                                        e_exx += 0.5*fillval*VECTS[ind1,n_code,spin]' * v *  VECTS[ind2,n_code,spin]
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end        
+    end    
+    
+
+    return e_exx
+
 end
 
 function choose_exc(exc, nspin)
@@ -2475,13 +2533,13 @@ end
 
 
 
-function vhart_LM(rho_dR, D2, g, N, M, lmaxrho, lmax, MP, V_L, gbvals2, S, VECTS)
+function vhart_LM(rho_dR, D2, g, N, M, lmaxrho, lmax, MP, V_L, gbvals2, S, VECTS, loopmax)
 
 
     #    println("size rho_dR ", size(rho_dR))
     #    println("lmax rho ", lmaxrho)
     #loopmax = min(lmax*2, lmaxrho)
-    loopmax = lmaxrho
+    #loopmax = lmaxrho
     #loopmax = lmaxrho
     VH_LM = zeros(N-1, N-1, lmaxrho+1, 2*lmaxrho+1)
     VH_LM2 = zeros(N-1, N-1, lmaxrho+1, 2*lmaxrho+1)
@@ -2497,6 +2555,7 @@ function vhart_LM(rho_dR, D2, g, N, M, lmaxrho, lmax, MP, V_L, gbvals2, S, VECTS
 
     for l = 0:loopmax
         for m = -l:l
+            println("size ", size(VH_LM), " ", size(VTILDE), " " , size(rho_dR))
             VH_LM[:, :, l+1, m+l+1], VTILDE[:,l+1,m+l+1] = vhart(rho_dR[:,1,l+1, m+l+1], D2, V_L, g, M, l, m, MP, gbvals2)
 #            println("VHART $l $m ", sum(abs.(VH_LM[:, :, l+1, m+l+1])),  "  " ,sum(abs.(rho_dR[:,1,l+1, m+l+1])))
             #, vh_mat2, vt, X
@@ -2699,7 +2758,7 @@ function vhart(rhor2, D2, V_L, g, M, l, m, MP, gbvals2)
     
 end
 
-function vxc_LM(rho_rs_M, drho_rs_M, g, M, N, funlist, gga, nspin, lmax, lmaxrho, LEB, R, invS, gbvals2)
+function vxc_LM(rho_rs_M, drho_rs_M, g, M, N, funlist, gga, nspin, lmax, lmaxrho, LEB, R, invS, gbvals2, loopmax)
 
     begin
         #get vxc in r space
@@ -2719,7 +2778,7 @@ function vxc_LM(rho_rs_M, drho_rs_M, g, M, N, funlist, gga, nspin, lmax, lmaxrho
         ERHO_tp = zeros( M+1, LEB.N)
         
         
-        loopmax = min(lmax*2, lmaxrho)
+#        loopmax = min(lmax*2, lmaxrho)
     end
         
     #get rho and then VXC in theta / phi / r space
@@ -2848,6 +2907,7 @@ function vxc_LM(rho_rs_M, drho_rs_M, g, M, N, funlist, gga, nspin, lmax, lmaxrho
         if !ismissing(funlist) && funlist != :lda_internal
             v = EXC_gal( (@view rho[:, :, ntp]) / sqrt(4*pi), funlist, (@view drho[:,:,:,ntp])/sqrt(4*pi), (@view ddrho_omega[:,:,ntp])/sqrt(4*pi), (@view VRHO_tp[:,:, ntp]), (@view VSIGMA_tp[:, :, ntp]), (@view dvsigma_theta[:,:,id]), (@view dvsigma_phi[:,:,id]), theta, gga, R,  g, invS, N, M)
             VXC_tp[:,:,ntp, id] += v
+            EXC_tp[:,ntp,id] += ERHO_tp[:,ntp] *2.0
         else
             VXC_tp[:,:,ntp,id] += VRHO_tp[:,:,ntp]
             EXC_tp[:,ntp,id] += ERHO_tp[:,ntp]
@@ -3519,7 +3579,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     #    println("rho_R2 ", rho_R2[1])
 
     println()
-    println("This test shuld be near integer")
+    println("This test should be near integer")
     println("ChebyshevDFT.Galerkin.do_1d_integral(rho[:,1,1,1], g) ", do_1d_integral(rho_R2[:,1,1,1], g))
     println()
 
@@ -3536,7 +3596,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     #VX_LM = zeros(1)
     VXC_LM = zeros(N-1,N-1,nspin, lmaxrho+1, lmaxrho*2+1)
 
-    Vin = zeros(M+1,nspin, lmaxrho+1, lmaxrho*2+1)
+
     
 
     vxc_tp = zeros(M+1,nspin, lmaxrho+1, lmaxrho*2+1)
@@ -3558,7 +3618,10 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
 #    println()
 #    println("NEL $nel exx $exx ex_factor $ex_factor")
 #    println()
-    loopmax = lmaxrho
+
+    loopmax = min(lmax*2, lmaxrho)
+    Vin = zeros(M+1,nspin, loopmax+1, loopmax*2+1)    
+        
     VTILDE = zeros(M+1,  loopmax, loopmax*2+1)
 
     for iter = 1:niters
@@ -3579,12 +3642,12 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
             #MP .= 0.0
             #MP[1] = MP_temp
             VH_LM_old = deepcopy(VH_LM)
-            VH_LM, VTILDE = vhart_LM( sum(rho_dR, dims=2), D2, g, N, M, lmaxrho, lmax, MP*ex_factor, V_L,gbvals2, S, VECTS) #ex_factor*
+            VH_LM, VTILDE = vhart_LM( sum(rho_dR, dims=2), D2, g, N, M, lmaxrho, lmax, MP*ex_factor, V_L,gbvals2, S, VECTS, loopmax) #ex_factor*
 
             println("vtilde ", 4 * pi * VTILDE[1])
-            Vin[:,1,:,:] += 4 * pi * VTILDE * 2.0 
+            Vin[:,1,:,:] += 4 * pi * VTILDE[:,1:loopmax+1, 1:loopmax*2+1] * 2.0 
             if nspin == 2
-                Vin[:,2,:,:] += 4 * pi * VTILDE * 2.0
+                Vin[:,2,:,:] += 4 * pi * VTILDE[:,1:loopmax+1, 1:loopmax*2+1] * 2.0
             end            
             #            println()
 #            println("sum diff VH_LM ", sum(abs.(VH_LM - VH_LM_old)))
@@ -3596,10 +3659,10 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
 
         #println("vxc")
         if funlist != :none && funlist != :hydrogen
-            VXC_LM, vxc_tp, exc_tp, VSIGMA_tp, EXC_LM, VXC_LM_M = vxc_LM( rho_rs_M, drho_rs_M_LM, g, M, N, funlist, gga, nspin, lmax, lmaxrho, LEB, R, invS, gbvals2)
+            VXC_LM, vxc_tp, exc_tp, VSIGMA_tp, EXC_LM, VXC_LM_M = vxc_LM( rho_rs_M, drho_rs_M_LM, g, M, N, funlist, gga, nspin, lmax, lmaxrho, LEB, R, invS, gbvals2, loopmax)
 
             println("VXC_LM_M ", VXC_LM_M[1])
-            Vin += VXC_LM_M * 2.0
+            Vin += VXC_LM_M[:,:,1:loopmax+1, 1:loopmax*2+1] * 2.0
             
         end
 
@@ -3717,7 +3780,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     println()
 
     
-    calc_energy(rho_rs_M, EXC_LM, funlist, g, N, M, R, Vin, filling, VALS, VTILDE, Z)
+    calc_energy(rho_rs_M, EXC_LM, funlist, g, N, M, R, Vin, filling, VALS, VTILDE, Z, VX_LM, lmax, VECTS, exx, mix_lm, nspin, big_code, lm_dict)
     println()
     
     #    println("size rho_rs_M", size(rho_rs_M))
