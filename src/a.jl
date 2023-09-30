@@ -1,3 +1,26 @@
+
+
+    vx2 =  zeros(N-1,N-1)
+    VX_LM2 = zeros(N-1, N-1, nspin, lmax+1, 2*lmax+1)
+
+    for spin = 1:nspin
+        vx2 .= 0.0
+        for n = 1:N-1
+            f = filling[n,spin,1,1]
+            println("f $spin $n  $f")
+            if f < 1e-20
+                break
+            end
+            t = mat_n2m*real(VECTS[:,n,nspin,1,1])
+            tf1 =  t ./ R  / sqrt(g.b-g.a) * sqrt(2 )
+            temp = diagm(tf1) * mat_m2n' * S * L * S *  mat_m2n * diagm(tf1)
+            vx2[:,:] +=   real(  f * mat_n2m'*temp*mat_n2m)
+            println("test s $spin n $n VX", VECTS[:,1,1,1,1]' * 4*pi*vx2* VECTS[:,1,1,1,1])
+        end
+        VX_LM2[:,:,spin,1,1] = vx2
+    end
+
+
 function f(rho_LM)
 
     

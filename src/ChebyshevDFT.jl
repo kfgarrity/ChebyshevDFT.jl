@@ -36,4 +36,6 @@ include("GalerkinNEW2.jl")
 include("GalerkinDFT.jl")
 #include("GalerkinDFTX.jl")
 
+include("CI.jl")
+
 end # module
