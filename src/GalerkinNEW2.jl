@@ -502,7 +502,7 @@ function get_vh_mat(vh_tilde, g::gal, l, m, MP, gbvals2; M = -1)
 
             #f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+  0.0*g.R.(@view g.pts[2:M+2,M]) / g.b *  MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi) ) .* (@view g.w[2:M+2,M]) #
 
-            f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+  g.R.(@view g.pts[2:M+2,M]).^l / g.b^l *  MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi) ) .* (@view g.w[2:M+2,M]) #
+            f = (vh_tilde_vec  ./ ( g.R.(@view g.pts[2:M+2,M]))  .+ g.R.(@view g.pts[2:M+2,M]).^l / g.b^l *  MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi) ) .* (@view g.w[2:M+2,M]) #
 
 #            println("vh factor $l $m ", MP[l+1, m+l+1]/g.b^(l+1) * sqrt(pi)/(2*pi) , " MP ", MP[l+1, m+l+1] , " sum g ", sum(g.R.(@view g.pts[2:M+2,M]).^l / g.b^l .* g.w[2:M+2,M]))
             

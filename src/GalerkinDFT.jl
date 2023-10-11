@@ -99,6 +99,8 @@ struct scf_data
     e_exx::Float64
     e_ke::Float64
     e_nuc::Float64
+    hf_sym::Array{Float64,7}
+    hf_sym_big::Array{Float64,9}
 end
 
 Base.show(io::IO, d::scf_data) = begin
@@ -177,9 +179,9 @@ end
 #end
 
 
-function make_scf_data(    g::gal,    N::Int64,    M::Int64,    rmax::Float64,  α::Float64,  Z::Float64,    nspin::Int64,    lmax::Int64,    lmaxrho::Int64,    mix_lm::Bool,    niters::Int64,    mix::Float64,    mixing_mode::Symbol,    conv_thr::Float64,    fill_str::String,    nel::Array{Float64,3},    exc,    funlist,    gga::Bool,    LEB::leb,    exx::Float64,    filling::Array{Float64,4},    VALS::Array{Float64,4},    VECTS_small::Array{Float64,5},    VECTS_big::Array{Float64,3}    ,    rho_R2::Array{Float64,4},    big_code,    R::Array{Float64},    D1::Array{Float64,2},    D2::Array{Float64,2},    S::Array{Float64},    V_C::Array{Float64,2},V_L::Array{Float64,2},    mat_n2m::Array{Float64,2},    mat_m2n::Array{Float64,2},    dict_lm,lm_dict,     etot::Float64,    e_vxc::Float64,    e_hart::Float64,    e_exx::Float64,    e_ke::Float64,    e_nuc::Float64)
+function make_scf_data(    g::gal,    N::Int64,    M::Int64,    rmax::Float64,  α::Float64,  Z::Float64,    nspin::Int64,    lmax::Int64,    lmaxrho::Int64,    mix_lm::Bool,    niters::Int64,    mix::Float64,    mixing_mode::Symbol,    conv_thr::Float64,    fill_str::String,    nel::Array{Float64,3},    exc,    funlist,    gga::Bool,    LEB::leb,    exx::Float64,    filling::Array{Float64,4},    VALS::Array{Float64,4},    VECTS_small::Array{Float64,5},    VECTS_big::Array{Float64,3}    ,    rho_R2::Array{Float64,4},    big_code,    R::Array{Float64},    D1::Array{Float64,2},    D2::Array{Float64,2},    S::Array{Float64},    V_C::Array{Float64,2},V_L::Array{Float64,2},    mat_n2m::Array{Float64,2},    mat_m2n::Array{Float64,2},    dict_lm,lm_dict,     etot::Float64,    e_vxc::Float64,    e_hart::Float64,    e_exx::Float64,    e_ke::Float64,    e_nuc::Float64, hf_sym, hf_sym_big)
 
-    return scf_data(    g,    N,    M,    rmax,  α,  Z,    nspin,    lmax,    lmaxrho,    mix_lm,    niters,    mix,    mixing_mode,    conv_thr,    fill_str,    nel,    exc,    funlist,    gga,    LEB,    exx,    filling,    VALS,    VECTS_small,    VECTS_big    ,    rho_R2,    big_code,    R,    D1,    D2,    S,    V_C, V_L,   mat_n2m,    mat_m2n,    dict_lm,lm_dict, etot, e_vxc, e_hart, e_exx, e_ke, e_nuc)
+    return scf_data(    g,    N,    M,    rmax,  α,  Z,    nspin,    lmax,    lmaxrho,    mix_lm,    niters,    mix,    mixing_mode,    conv_thr,    fill_str,    nel,    exc,    funlist,    gga,    LEB,    exx,    filling,    VALS,    VECTS_small,    VECTS_big    ,    rho_R2,    big_code,    R,    D1,    D2,    S,    V_C, V_L,   mat_n2m,    mat_m2n,    dict_lm,lm_dict, etot, e_vxc, e_hart, e_exx, e_ke, e_nuc, hf_sym, hf_sym_big)
 
 
 end
@@ -260,6 +262,11 @@ function calc_energy_ke(rho_rs_M_LM, Vin , g, N, M, R, filling, vals, e_exx)
 end
 
 function calc_energy_vh(rho_rs_M_LM, VH , g, N, M, R)
+
+    println("hartree s ", 2.0*0.5*4*pi* sum((sum( sum(rho_rs_M_LM, dims=2)[:,1,1,1] .* VH[:,1,1], dims=[2,3]) .* g.w[2:M+2,M] .* R.^2  ))  /sqrt(4*pi)/2 * (g.b - g.a)/2.0)
+
+#    println("hartree p ", 2.0*0.5*4*pi* sum((sum( sum(rho_rs_M_LM, dims=2)[:,1,2,:] .* VH[:,2,:], dims=[2,3]) .* g.w[2:M+2,M] .* R.^2  ))  /sqrt(4*pi)/2 * (g.b - g.a)/2.0)
+#    println("hartree d ", 2.0*0.5*4*pi* sum((sum( sum(rho_rs_M_LM, dims=2)[:,1,3,:] .* VH[:,3,:], dims=[2,3]) .* g.w[2:M+2,M] .* R.^2  ))  /sqrt(4*pi)/2 * (g.b - g.a)/2.0)        
 
     
     return 2.0*0.5*4*pi* sum((sum( sum(rho_rs_M_LM, dims=2)[:,1,:,:] .* VH, dims=[2,3]) .* g.w[2:M+2,M] .* R.^2  ))  /sqrt(4*pi)/2 * (g.b - g.a)/2.0
@@ -2362,14 +2369,14 @@ function vxx_LM5(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbv
                     tf1 .=  t ./ R  / sqrt(g.b-g.a) * sqrt(2 )
                     mt .= mat_n2m'*diagm(tf1)
 #                    mt1 .= mat_n2m'*diagm(t) / sqrt(g.b-g.a) * sqrt(2 )
-                    MP_x .= 0.0
+#                    MP_x .= 0.0
                     #MP_x[1] = nspin
                     #   for L = 0:0
                     
-                    for L = 0:lmax*2
-                    
-                        MP_x[L+1] = f * sum( ( t.*conj(t) .*R.^L .* g.w[2:M+2,M])) / (2*L +1)
-                    end
+#                    for L = 0:lmax*2
+#                    
+#                        MP_x[L+1] = f * sum( ( t.*conj(t) .*R.^L .* g.w[2:M+2,M])) / (2*L +1)
+#                    end
 
 
 #                    MAT .= S* (@view VECTS[:,n,spin,l+1, m+l+1])* (@view VECTS[:,n,spin,l+1, m+l+1])'*S'
@@ -2892,8 +2899,8 @@ function vhart(rhor2, D2, V_L, g, M, l, m, MP, gbvals2)
     #              + MP[l+1, m+l+1]/g.b^(l+1) *diagm(1.0 ./ rhor2   ))  * rhor2 /(4*pi)*sqrt(pi)
 
 
-    t = mat_n2m * rhor2
-    vt2 = diagm( 1.0 ./g.R.(@view g.pts[2:M+2,M])) *mat_n2m* (inv(D2 + l*(l+1)*V_L)) * rhor2 /(4*pi)*sqrt(pi) + 2.0*MP[l+1, m+l+1]/g.b^(l+1) * diagm(t.^-1) *  mat_n2m * rhor2 /(4*pi)*sqrt(pi)
+#    t = mat_n2m * rhor2
+#    vt2 = diagm( 1.0 ./g.R.(@view g.pts[2:M+2,M])) *mat_n2m* (inv(D2 + l*(l+1)*V_L)) * rhor2 /(4*pi)*sqrt(pi) + 2.0*MP[l+1, m+l+1]/g.b^(l+1) * diagm(t.^-1) *  mat_n2m * rhor2 /(4*pi)*sqrt(pi)
     
     
     #    vt2 =  diagm( 1.0 ./g.R.(@view g.pts[2:M+2,M])) *mat_n2m* (0.0*inv(D2 + l*(l+1)*V_L) + MP[l+1, m+l+1]/g.b^(l+1) *diagm(1.0 ./ rhor2   ))  * rhor2 /(4*pi)*sqrt(pi)
@@ -3961,7 +3968,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     println(size(VECTS_small))
     println(size(VECTS_big))
     
-    dat = make_scf_data(   g,    N,    M,    g.b, g.α,    Z,    nspin,    lmax,    lmaxrho,    mix_lm,    niters,    mix,    mixing_mode,    conv_thr,    fill_str,    nel,    exc,    funlist,    gga,    LEB,    exx,    filling,    VALS,    VECTS_small,    VECTS_big    ,    rho_R2,    big_code,    R,    D1,    D2,    S,    V_C,  V_L,  mat_n2m,    mat_m2n,    dict_lm,lm_dict, etot, e_vxc, e_hart, e_exx, e_ke, e_nuc)
+    dat = make_scf_data(   g,    N,    M,    g.b, g.α,    Z,    nspin,    lmax,    lmaxrho,    mix_lm,    niters,    mix,    mixing_mode,    conv_thr,    fill_str,    nel,    exc,    funlist,    gga,    LEB,    exx,    filling,    VALS,    VECTS_small,    VECTS_big    ,    rho_R2,    big_code,    R,    D1,    D2,    S,    V_C,  V_L,  mat_n2m,    mat_m2n,    dict_lm,lm_dict, etot, e_vxc, e_hart, e_exx, e_ke, e_nuc, hf_sym, hf_sym_big)
     
     return dat
     
