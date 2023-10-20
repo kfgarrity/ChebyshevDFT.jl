@@ -8,3 +8,4 @@ include("test_gal.jl")
 include("test_hf.jl")
 
 
+include("test_ci.jl")

@@ -87,6 +87,7 @@ struct scf_data
     D1::Array{Float64,2}
     D2::Array{Float64,2}
     S::Array{Float64}
+    S5::Array{Float64,2}
     V_C::Array{Float64,2}
     V_L::Array{Float64,2}
     mat_n2m::Array{Float64,2}
@@ -101,12 +102,14 @@ struct scf_data
     e_nuc::Float64
     hf_sym::Array{Float64,7}
     hf_sym_big::Array{Float64,9}
+    orthogonalize::Bool
+    SVECTS_small::Array{Float64,5}
 end
 
 Base.show(io::IO, d::scf_data) = begin
 
-    println(io, "SCF input data")
-    println(io, "N=$(d.N) ; M=$(d.M) ; rmax=$(d.rmax) ; α=$(d.α)")
+    println(io, "SCF data")
+    println(io, "N=$(d.N) ; M=$(d.M) ; rmax=$(d.rmax) ; α=$(d.α) ; orthogonalize=$(d.orthogonalize)")
     println(io, "Z=$(d.Z) ; nspin=$(d.nspin) ; lmax=$(d.lmax) ; lmaxrho=$(d.lmaxrho) ; mix_lm=$(d.mix_lm) ; fill_str=$(d.fill_str); net_charge=$(sum(d.nel) - d.Z)")
     println(io, "mix=$(d.mix) ; mising_mode=:$(d.mixing_mode) ; conv_thr=$(d.conv_thr) ; niters=$(d.niters)")
     println(io, "Functional: $(d.exc) ; gga=$(d.gga) ; exx=$(d.exx) " )
@@ -151,9 +154,26 @@ function get_vect_gal(d, n, l, m, spin=1)
         return vv
 
     end
+end
 
-        
+function get_Svect_gal(d, n, l, m, spin=1)
+    if d.mix_lm == false
+        return d.SVECTS_small[:,n,spin,l+1,l+m+1]
+    else
+        vnum = d.big_code[(spin, l,m)]
+        v = d.VECTS_big[:,vnum[n], spin]
+        vv = zeros(d.N-1, length( d.lm_dict))
+        c = 0
+        for l = 0:d.lmax
+            for m = -l:l
+                c+=1
+                ind = ( 1:(d.N-1)) .+ (d.N-1)*d.lm_dict[(l,m )]
+                vv[:,d.lm_dict[(l,m )]+1 ] = v[ind]
+            end
+        end
+        return vv
 
+    end
 end
 
 function get_vect_r(r,d,n,l,m,spin=1; deriv=0)
@@ -179,9 +199,23 @@ end
 #end
 
 
-function make_scf_data(    g::gal,    N::Int64,    M::Int64,    rmax::Float64,  α::Float64,  Z::Float64,    nspin::Int64,    lmax::Int64,    lmaxrho::Int64,    mix_lm::Bool,    niters::Int64,    mix::Float64,    mixing_mode::Symbol,    conv_thr::Float64,    fill_str::String,    nel::Array{Float64,3},    exc,    funlist,    gga::Bool,    LEB::leb,    exx::Float64,    filling::Array{Float64,4},    VALS::Array{Float64,4},    VECTS_small::Array{Float64,5},    VECTS_big::Array{Float64,3}    ,    rho_R2::Array{Float64,4},    big_code,    R::Array{Float64},    D1::Array{Float64,2},    D2::Array{Float64,2},    S::Array{Float64},    V_C::Array{Float64,2},V_L::Array{Float64,2},    mat_n2m::Array{Float64,2},    mat_m2n::Array{Float64,2},    dict_lm,lm_dict,     etot::Float64,    e_vxc::Float64,    e_hart::Float64,    e_exx::Float64,    e_ke::Float64,    e_nuc::Float64, hf_sym, hf_sym_big)
+function make_scf_data(    g::gal,    N::Int64,    M::Int64,    rmax::Float64,  α::Float64,  Z::Float64,    nspin::Int64,    lmax::Int64,    lmaxrho::Int64,    mix_lm::Bool,    niters::Int64,    mix::Float64,    mixing_mode::Symbol,    conv_thr::Float64,    fill_str::String,    nel::Array{Float64,3},    exc,    funlist,    gga::Bool,    LEB::leb,    exx::Float64,    filling::Array{Float64,4},    VALS::Array{Float64,4},    VECTS_small::Array{Float64,5},    VECTS_big::Array{Float64,3}    ,    rho_R2::Array{Float64,4},    big_code,    R::Array{Float64},    D1::Array{Float64,2},    D2::Array{Float64,2},    S::Array{Float64}, S5::Array{Float64,2},   V_C::Array{Float64,2},V_L::Array{Float64,2},    mat_n2m::Array{Float64,2},    mat_m2n::Array{Float64,2},    dict_lm,lm_dict,     etot::Float64,    e_vxc::Float64,    e_hart::Float64,    e_exx::Float64,    e_ke::Float64,    e_nuc::Float64, hf_sym, hf_sym_big, orthogonalize::Bool)
 
-    return scf_data(    g,    N,    M,    rmax,  α,  Z,    nspin,    lmax,    lmaxrho,    mix_lm,    niters,    mix,    mixing_mode,    conv_thr,    fill_str,    nel,    exc,    funlist,    gga,    LEB,    exx,    filling,    VALS,    VECTS_small,    VECTS_big    ,    rho_R2,    big_code,    R,    D1,    D2,    S,    V_C, V_L,   mat_n2m,    mat_m2n,    dict_lm,lm_dict, etot, e_vxc, e_hart, e_exx, e_ke, e_nuc, hf_sym, hf_sym_big)
+
+    if orthogonalize
+        SVECTS_small = zeros(size(VECTS_small))
+        for i = 1:size(VECTS_small)[3]
+            for j = 1:size(VECTS_small)[4]
+                for k = 1:size(VECTS_small)[5]
+                    SVECTS_small[:,:,i,j,k] = S5*VECTS_small[:,:,i,j,k]
+                end
+            end
+        end
+    else
+        SVECTS_small = VECTS_small
+    end
+
+    return scf_data(    g,    N,    M,    rmax,  α,  Z,    nspin,    lmax,    lmaxrho,    mix_lm,    niters,    mix,    mixing_mode,    conv_thr,    fill_str,    nel,    exc,    funlist,    gga,    LEB,    exx,    filling,    VALS,    VECTS_small,    VECTS_big    ,    rho_R2,    big_code,    R,    D1,    D2,    S,  S5,  V_C, V_L,   mat_n2m,    mat_m2n,    dict_lm,lm_dict, etot, e_vxc, e_hart, e_exx, e_ke, e_nuc, hf_sym, hf_sym_big, orthogonalize, SVECTS_small)
 
 
 end
@@ -293,9 +327,10 @@ function calc_energy_exx(VX_LM, VECTS, filling, g, N, M, mix_lm, lmax, nspin, bi
                         f = filling[n,spin,l1+1,m1+l1+1]
                         
                         fillval = filling[n, spin, l1+1, l1+m1+1]
-                        if fillval < 1e-20
-                            break
-                        end
+                        #fix1
+                        #                        if fillval < 1e-20
+#                            break
+#                        end
                         e_exx += 0.5*fillval*VECTS[:,n,spin, l1+1, l1+m1+1]' * v *  VECTS[:,n,spin, l1+1, l1+m1+1]
                     end
                 end
@@ -310,9 +345,10 @@ function calc_energy_exx(VX_LM, VECTS, filling, g, N, M, mix_lm, lmax, nspin, bi
                     nlist = big_code[(spin,l, m)]
                     for (n_count, n_code) in enumerate(nlist)
                         fillval = filling[n_count,spin,l+1,m+l+1]
-                        if fillval < 1e-20
-                            continue
-                        end
+                        #fix1
+                        #                        if fillval < 1e-20
+#                            continue
+#                        end
                         for l1 = 0:(lmax)
                             for m1 = -l1:l1
                                 ind1 = (1:Nsmall) .+ Nsmall*lm_dict[(l1,m1)]
@@ -518,7 +554,7 @@ function mix_vects_big(VECTS, VECTS_new, mix, filling, Sbig, nspin, lmax, N, big
     
 end
 
-function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm)
+function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm, orthogonalize)
 
     if typeof(Z) == String || typeof(Z) == Symbol
         Z = atoms[String(Z)]
@@ -541,6 +577,8 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm)
 #    println("setup filling")
     nel, nspin, lmax, filling = setup_filling(fill_str, N, lmax_init=lmax)
 
+
+    
     fs = sum(filling, dims=[2,3,4])
     nmax = findfirst(fs[:] .> 1e-12)
 #    println("nmax $nmax")
@@ -548,7 +586,7 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm)
     
     println("choose exc")
     funlist, gga = choose_exc(exc, nspin)
-
+    
 
     lm_dict = Dict()
     dict_lm = Dict()
@@ -598,6 +636,21 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm)
 
     S = g.s[1:N-1, 1:N-1]
 
+    Sold = deepcopy(S)
+
+    S5 = S^-0.5
+    if orthogonalize
+        D1 = S5* D1 * S5
+        D2 = S5* D2 * S5
+        V_C = S5* V_C * S5
+        V_L = S5 * V_L * S5
+        
+        S = I(size(S)[1])
+    else
+        S5 = collect(I(size(S)[1]))
+    end
+
+    
     invsqrtS = inv(sqrt(S))
     invS = inv(S)
     
@@ -709,6 +762,8 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm)
 #    r5 = mat_n2m'*diagm( (R/g.b).^(L/2.0) ) * mat_m2n'#
 #
     R5 = Dict()
+
+
     
     LINOP = Dict()
     for L = 0:lmax*2
@@ -747,6 +802,8 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm)
         #R5[L] = mat_m2n*diagm( (R/g.b).^(L/2 ) ) * mat_n2m
     end
 
+
+        
     if mix_lm
         Sbig = zeros( (N-1)*length(lm_dict), (N-1)*length(lm_dict))
         for l = 0:(lmax)
@@ -769,7 +826,7 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm)
         
     
     
-    return Z, nel, filling, nspin, lmax, V_C, V_L,D1, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga, LEB, R, gbvals2, nmax, hf_sym, hf_sym_big,mat_n2m, mat_m2n, R5, LINOP, lm_dict, dict_lm, big_code, Sbig
+    return Z, nel, filling, nspin, lmax, V_C, V_L,D1, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga, LEB, R, gbvals2, nmax, hf_sym, hf_sym_big,mat_n2m, mat_m2n, R5, LINOP, lm_dict, dict_lm, big_code, Sbig, S5, Sold
     
 end
 
@@ -993,13 +1050,13 @@ function display_filling(filling, lmax, nmax, nspin)
                 #                println("$l $m $n")
                 if nspin == 1
                     f = filling[n,1,l+1, m+l+1]
-                    if abs(f) > 1e-20 
+                    if abs(f) > 1e-20 || n < nmax[l+1]
                         @printf "%2i %2i %2i  %4f \n" (n+l) l m f
                     end
                 elseif nspin == 2
                     f1 = filling[n,1,l+1, m+l+1]
                     f2 = filling[n,2,l+1, m+l+1]
-                    if abs(f1) > 1e-20 ||  abs(f2) > 1e-20
+                    if abs(f1) > 1e-20 ||  abs(f2) > 1e-20 || n < nmax[l+1]
                         @printf "%2i %2i %2i  %4f   %4f \n" (n+l) l m  f1 f2
                     end
                 end
@@ -1010,7 +1067,7 @@ function display_filling(filling, lmax, nmax, nspin)
 
 end
 
-function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga, exx, nmax)
+function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga, exx, nmax, S5, orthogonalize)
     #    println("get rho")
     #rho = zeros(N-1, nspin, lmax+1, 2*lmax+1)
 #    rho_rs_M_R2 = zeros(M+1, nspin)
@@ -1027,16 +1084,22 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
                 for n = 1:N-1
                     fillval = filling[n, spin, l+1, l+m+1]
                     #                    println("add fillval $spin $l $m ", fillval)
-                    if fillval < 1e-20
-                        break
-                    end
-#                    println("VECTS ", size(VECTS[:, n, spin, l+1,l+1+m]))
+
+                    #fix1
+#                    if fillval < 1e-20
+#                        break
+#                    end
+
+                    #                    println("VECTS ", size(VECTS[:, n, spin, l+1,l+1+m]))
 #                    t = gal_rep_to_rspace(VECTS[:, n, spin, l+1,l+1+m], g, M=M)
 #                    println("size ", size(VECTS))
  #                   println("test ", t - mat_n2m * VECTS[:, n, spin, l+1,l+1+m])
 
-                    t = mat_n2m * VECTS[:, n, spin, l+1,l+1+m]
-                    
+                    if orthogonalize
+                        t = mat_n2m * S5 * VECTS[:, n, spin, l+1,l+1+m]
+                    else
+                        t = mat_n2m * VECTS[:, n, spin, l+1,l+1+m]
+                    end                        
 #                    println("ttttt ", t[1:3], " ts ", real((S*VECTS[:, n, spin, l+1,l+1+m]))[1:3])
 #                    t2 = real(t.*conj(t))
 #                    rho_rs_M_R2[:,spin] += t2 * fillval
@@ -1044,7 +1107,12 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
 
                     if gga
                     #    vt = VECTS[:, n, spin, l+1,l+1+m]
-                        dt = gal_rep_to_rspace(VECTS[:, n, spin, l+1,l+1+m] , g, M=M, deriv=1)
+                        if orthogonalize
+                            dt = gal_rep_to_rspace(S5 * VECTS[:, n, spin, l+1,l+1+m] , g, M=M, deriv=1)
+                        else
+                            dt = gal_rep_to_rspace(VECTS[:, n, spin, l+1,l+1+m] , g, M=M, deriv=1)                            
+                        end
+                        
                         drho_rs_M_R2_LM2[:,spin, l+1, m+1+l] += real( t .* conj.(dt) + dt .* conj.(t)  ) * fillval
                     end
                     
@@ -1054,52 +1122,6 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
     end
 
 #    psipsi = zeros(M+1, nspin, nmax, lmax+1, 2*lmax+1, nmax, lmax+1, 2*lmax+1)
-    if false
-        if exx > 1e-12
-            for spin = 1:nspin
-                for l1 = 0:lmax
-                    for m1 = -l1:l1
-                        for n1 = 1:nmax
-                            fillval1 = filling[n1, spin, l1+1, l1+m1+1]
-                            #                    println("add fillval $spin $l $m ", fillval)
-                            if fillval1 < 1e-20
-                                break
-                            end
-                            t1 = gal_rep_to_rspace(VECTS[:, n1, spin, l1+1,l1+1+m1], g, M=M)
-                            
-                            for l2 = 0:lmax
-                                for m2 = -l2:l2
-                                    for n2 = 1:nmax
-                                        fillval2 = filling[n2, spin, l2+1, l2+m2+1]
-                                        
-                                        if fillval2 < 1e-20
-                                            break
-                                        end
-                                        t2 = gal_rep_to_rspace(VECTS[:, n2, spin, l2+1,l2+1+m2], g, M=M)
-#                                        psipsi[:,spin, n1,l1+1, m1+1+l1, n2, l2+1, m2+l2+1] += real(t1.*conj(t1)) * sqrt(fillval1)*sqrt(fillval2)
-                                        
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-#    println("pp ", psipsi[1], " " , rho_rs_M_R2_LM2[1], " " ,  psipsi[1]/rho_rs_M_R2_LM2[1])
-    
-    
-#=    for spin = 1:nspin
-        for l = 0:lmax
-            for m = -l:l
-                grep = get_gal_rep(rho_rs_M_R2_LM2[:,spin, l+1, m+1+l], g, N=N)
-                dt = gal_rep_to_rspace(grep  , g, M=M, deriv=1)
-                drho_rs_M_R2_LM2[:,spin, l+1, m+1+l] += dt
-            end
-        end
-    end
-=#
     
 
     
@@ -1346,9 +1368,10 @@ function get_rho_big(VALS, VECTS_big, nel, filling, nspin, lmax, lmaxrho, N, M, 
                     
                     fillval = filling[c_n, spin, l+1, l+m+1]
                     #                    println("add fillval $spin $l $m ", fillval)
-                    if fillval < 1e-20
-                        continue
-                    end
+                    #fix1
+                    #                    if fillval < 1e-20
+#                        continue
+#                    end
                     for c1 = 1:length(lm_dict)
                         (ll1,mm1) = dict_lm[c1]
 #                        t1 = gal_rep_to_rspace(VECTS_big[(1:(N-1)).+(c1-1)*(N-1), n, spin], g, M=M)
@@ -2362,9 +2385,10 @@ function vxx_LM5(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbv
                 for n = 1:N-1 #this is the sum over b as well
                     
                     f = filling[n,spin,l+1,m+l+1]
-                    if f < 1e-20
-                        break
-                    end
+                    #fix1
+#                    if f < 1e-20
+#                        break
+#                    end
                     t .= real(mat_n2m*(@view VECTS[:,n,spin,l+1, m+l+1]))
                     tf1 .=  t ./ R  / sqrt(g.b-g.a) * sqrt(2 )
                     mt .= mat_n2m'*diagm(tf1)
@@ -2888,10 +2912,10 @@ function vhart(rhor2, D2, V_L, g, M, l, m, MP, gbvals2)
 #    println("size2 ", size(rhor2))
 #    println("size3 ", size( diagm( 1.0 ./ g.R.(@view g.pts[2:M+2,M]) )))
 
-    mat_n2m = MAT_N2M(g, N=size(D2)[1]+1, M=M)
-    mat_m2n = MAT_M2N(g, N=size(D2)[1]+1, M=M)
+#    mat_n2m = MAT_N2M(g, N=size(D2)[1]+1, M=M)
+#    mat_m2n = MAT_M2N(g, N=size(D2)[1]+1, M=M)
 
-    R = g.R.(@view g.pts[2:M+2,M])
+#    R = g.R.(@view g.pts[2:M+2,M])
 
 
     #vt2 =  diagm( 1.0 ./g.R.(@view g.pts[2:M+2,M])) *mat_n2m* (inv(D2 + l*(l+1)*V_L) + 0.0*MP[l+1, m+l+1]/g.b^(l+1) *diagm(1.0 ./ rhor2   ))  * rhor2 /(4*pi)*sqrt(pi)
@@ -3680,9 +3704,10 @@ function get_t2(VECTS, mat_n2m, mat_m2n, N, M, nspin, lmax)
                 for n = 1:N-1
                     fillval = filling[n, spin, l+1, l+m+1]
                     #                    println("add fillval $spin $l $m ", fillval)
-                    if fillval < 1e-20
-                        break
-                    end
+                    #fix1
+#                    if fillval < 1e-20
+#                        break
+#                    end
                     t = mat_n2m * VECTS[:, n, spin, l+1,l+1+m]
                     t2[:,n,spin, l+1, l+m+1] = t*conj(t) * fillval
                 end
@@ -3694,7 +3719,7 @@ function get_t2(VECTS, mat_n2m, mat_m2n, N, M, nspin, lmax)
 end
 
 
-function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters = 50, mix = 0.5, mixing_mode=:pulay, exc = missing, lmax = missing, conv_thr = 1e-7, lmaxrho = 0, mix_lm = false, exx = 0.0, VECTS=missing)
+function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters = 50, mix = 0.5, mixing_mode=:pulay, exc = missing, lmax = missing, conv_thr = 1e-7, lmaxrho = 0, mix_lm = false, exx = 0.0, VECTS=missing, orthogonalize=false)
 
     if M > g.M
         M = g.M
@@ -3715,8 +3740,24 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     
     
     println("time prepare")
-    @time Z, nel, filling, nspin, lmax, V_C, V_L, D1, D2, S, invsqrtS, invS, VECTS_start, VALS, funlist, gga, LEB, R, gbvals2, nmax, hf_sym, hf_sym_big, mat_n2m, mat_m2n, R5, LINOP, lm_dict, dict_lm, big_code, Sbig = prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm)
+    @time Z, nel, filling, nspin, lmax, V_C, V_L, D1, D2, S, invsqrtS, invS, VECTS_start, VALS, funlist, gga, LEB, R, gbvals2, nmax, hf_sym, hf_sym_big, mat_n2m, mat_m2n, R5, LINOP, lm_dict, dict_lm, big_code, Sbig, S5, Sold = prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm, orthogonalize)
 
+    if false
+        filling .= 0.0
+        filling[1,1,1,1] = 0.0
+        filling[1,2,1,1] = 0.0
+        filling[2,1,1,1] = 1.0
+        filling[2,2,1,1] = 1.0
+        nmax=[2,2]
+        display_filling(filling, lmax, nmax, nspin)
+        nmax=2
+    end
+
+    
+    if exc == :hydrogen
+        exx = 0.0
+    end
+    
     VECTS_big = zeros(Float64, length(lm_dict) * (N-1), length(lm_dict) * (N-1), nspin)
     VECTS_small = zeros(Float64, N-1,N-1, nspin, lmax+1,2*lmax+1 )
 
@@ -3743,7 +3784,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
         rho_R2, rho_dR, rho_rs_M, drho_rs_M_LM, MP  = get_rho_big(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2, lm_dict, dict_lm, big_code, gga, R) 
 
     else
-        rho_R2, rho_dR, rho_rs_M, drho_rs_M_LM, MP = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, true, exx, nmax)
+        rho_R2, rho_dR, rho_rs_M, drho_rs_M_LM, MP = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, true, exx, nmax, S5, orthogonalize)
     end
 #    println("MP")
 #    println(MP)
@@ -3795,8 +3836,19 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     loopmax = min(lmax*2, lmaxrho)
     Vin = zeros(M+1,nspin, loopmax+1, loopmax*2+1)    
         
-    VTILDE = zeros(M+1,  loopmax, loopmax*2+1)
+    VTILDE = zeros(M+1,  loopmax+1, loopmax*2+1)
+    println("size VTILDE x ", size(VTILDE))
 
+
+    Vin .= 0.0
+    Vin[:,1,1,1] = -Z ./ R * 4 *pi / sqrt(pi) 
+    if nspin == 2
+        Vin[:,2,1,1] = -Z ./ R * 4 *pi / sqrt(pi) 
+    end
+    
+    etot, e_vxc, e_hart, e_exx, e_ke, e_nuc = calc_energy(rho_rs_M, EXC_LM, funlist, g, N, M, R, Vin, filling, VALS, VTILDE, Z, VX_LM, lmax, VECTS, exx, mix_lm, nspin, big_code, lm_dict)
+
+    
     for iter = 1:niters
 
         Vin .= 0.0
@@ -3816,6 +3868,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
             #MP[1] = MP_temp
             VH_LM_old = deepcopy(VH_LM)
             VH_LM, VTILDE = vhart_LM( sum(rho_dR, dims=2), D2, g, N, M, lmaxrho, lmax, MP*ex_factor, V_L,gbvals2, S, VECTS, loopmax) #ex_factor*
+            println("size VTILDE x ", size(VTILDE))
 
             println("vtilde ", sum( VTILDE[:,1,1,1]))
             Vin[:,1,:,:] += 4 * pi * VTILDE[:,1:loopmax+1, 1:loopmax*2+1] * 2.0 
@@ -3900,16 +3953,18 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
             if mix_lm
                 VECTS_old = deepcopy(VECTS)
                 big_code_old = deepcopy(big_code)
-                mix_vects_big(VECTS, VECTS_new, mix, filling, Sbig, nspin, lmax, N, big_code, big_code_new, VALS, VALS_big)
+                mix_vects_big(VECTS, VECTS_new, mix, filling, Sbig, nspin, lmax, N, big_code, big_code_new, VALS, VALS_big, mixall=true)
             else
-                mix_vects(VECTS, VECTS_new, mix, filling, S, nspin, lmax, N)
+                mix_vects(VECTS, VECTS_new, mix, filling, S, nspin, lmax, N, mixall=true)
             end                
             #VECTS = VECTS*mix + VECTS_new*(1-mix)
 
             rho_R2_old = deepcopy(rho_R2)
             #println("get rho")
+
+
             if mix_lm == false
-                rho_R2, rho_dR, rho_rs_M,  drho_rs_M_LM, MP  = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga, exx, nmax)
+                rho_R2, rho_dR, rho_rs_M,  drho_rs_M_LM, MP  = get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, gga, exx, nmax, S5, orthogonalize)
             else
                 rho_R2, rho_dR, rho_rs_M,  drho_rs_M_LM, MP  = get_rho_big(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g, D2, lm_dict, dict_lm, big_code, gga, R) 
             end                
@@ -3936,7 +3991,8 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
             
         
     end
-    println("done iters")
+
+        println("done iters")
 
 #    println("VALS after l0 ", VALS[1:2, 1, 1,1])
 #    println("VALS after l1 ", VALS[1:2, 1, 2,2])
@@ -3968,7 +4024,14 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     println(size(VECTS_small))
     println(size(VECTS_big))
     
-    dat = make_scf_data(   g,    N,    M,    g.b, g.α,    Z,    nspin,    lmax,    lmaxrho,    mix_lm,    niters,    mix,    mixing_mode,    conv_thr,    fill_str,    nel,    exc,    funlist,    gga,    LEB,    exx,    filling,    VALS,    VECTS_small,    VECTS_big    ,    rho_R2,    big_code,    R,    D1,    D2,    S,    V_C,  V_L,  mat_n2m,    mat_m2n,    dict_lm,lm_dict, etot, e_vxc, e_hart, e_exx, e_ke, e_nuc, hf_sym, hf_sym_big)
+    S = Float64.(collect(S))
+#    println("size(S) ", size(S))
+#    println("size D2 ", size(D2))
+#    println("typeof D2", typeof(D2))
+#    println("typeof S ", typeof(S))
+#   println("typeof S5 ", typeof(S5))
+    S5 = Float64.(S5)
+    dat = make_scf_data(   g,    N,    M,    g.b, g.α,    Z,    nspin,    lmax,    lmaxrho,    mix_lm,    niters,    mix,    mixing_mode,    conv_thr,    fill_str,    nel,    exc,    funlist,    gga,    LEB,    exx,    filling,    VALS,    VECTS_small,    VECTS_big    ,    rho_R2,    big_code,    R,    D1,    D2,    S,  S5,  V_C,  V_L,  mat_n2m,    mat_m2n,    dict_lm,lm_dict, etot, e_vxc, e_hart, e_exx, e_ke, e_nuc, hf_sym, hf_sym_big, orthogonalize)
     
     return dat
     
