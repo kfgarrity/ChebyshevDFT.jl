@@ -4,6 +4,7 @@ using ChebyshevQuantum
 using ChebyshevDFT
 using Test
 using Suppressor
+using LinearAlgebra
 
 tol_var=1e-5
 
