@@ -7,6 +7,8 @@ using ..Galerkin:do_1d_integral
 using ..AngularIntegration:real_gaunt_dict
 using Combinatorics
 using SparseArrays
+using LoopVectorization
+using Suppressor
 
 function matrix_coulomb_small_old(dat, nlms1, nlms2, nlms3, nlms4)
 
@@ -53,6 +55,102 @@ function matrix_coulomb_small_old(dat, nlms1, nlms2, nlms3, nlms4)
 
 
 end
+
+function precalc(dat, s)
+
+    ns = size(s)[1]
+    LMAX = maximum(s[:,2])
+    VH = zeros(Float64, ns, ns, 2*LMAX+1, dat.M+1)
+    RR = zeros(Float64, ns, ns, dat.M+1)
+
+    MAT = zeros(dat.N-1, dat.N-1, LMAX*2+1)
+    for L = 0:(LMAX*2)
+        MAT[:,:,L+1] = inv(dat.D2 + L*(L+1)*dat.V_L)
+    end
+
+    basis_dict = Dict{Array{ Int64}, Int64}()
+    
+    for i1 in 1:ns
+        n1,l1,m1,s1 = s[i1,:]
+
+
+        basis_dict[s[i1,:]] = i1
+        
+        v1=get_vect_gal(dat, n1,l1,m1,s1)
+        V1 = dat.mat_n2m * v1
+
+        for i2 in 1:ns
+
+            n2,l2,m2,s2 = s[i2,:]
+            if s1 != s2
+                continue
+            end
+
+            v2=get_vect_gal(dat, n2,l2,m2,s2)
+            V2 = dat.mat_n2m * v2
+
+            r = V1 .* V2
+            #rn = dat.mat_m2n*r
+            RR[i1, i2, :] = r .* dat.g.w[2:dat.M+2,dat.M]
+            rn_dR = dat.S * dat.mat_m2n*(r ./ dat.R)  *  (2.0/dat.rmax)
+            for L = 0:(LMAX*2)
+                vh = MAT[:,:,L+1] *  rn_dR
+                vhv = dat.mat_n2m * vh 
+                MP = sum( r .* dat.g.w[2:dat.M+2,dat.M] .* dat.R.^L) / (2*L+1) 
+                vhx = ( vhv ./ dat.R / sqrt(4*pi) /2   .+ dat.R.^L ./ dat.g.b^L  / dat.g.b^(L+1) * MP * sqrt(pi)/(2*pi) )   #.* dat.g.w[2:dat.M+2, dat.M]
+                
+                
+                VH[i1,i2,L+1, :] =  vhx * ( sqrt(pi) * (2*L+1) )
+            end
+        end
+    end
+
+    return VH, RR, basis_dict
+    
+end
+
+function matrix_coulomb_small_precalc(dat, nlms1, nlms2, nlms3, nlms4, basis_dict, VH, RR)
+    #    println("a")
+    begin 
+        i1 = basis_dict[nlms1]
+        i2 = basis_dict[nlms2]
+        i3 = basis_dict[nlms3]
+        i4 = basis_dict[nlms4]
+        
+        l1 = nlms1[2]
+        l2 = nlms2[2]
+        l3 = nlms3[2]
+        l4 = nlms4[2]
+
+        m1 = nlms1[3]
+        m2 = nlms2[3]
+        m3 = nlms3[3]
+        m4 = nlms4[3]
+
+        ret = 0.0
+        LMAX = max(l1,l2,l3,l4)*2
+        Mp1=dat.M+1
+        sym_factor = @view dat.hf_sym_big[l1+1, l1+m1+1,l3+1, l3+m3+1,l2+1,m2+l2+1,l4+1,m4+l4+1,:]
+    end
+    #println("b")
+
+    @tturbo for L = 0:LMAX
+        ###sym_factor = dat.hf_sym_big[l1+1, l1+m1+1,l3+1, l3+m3+1,l2+1,m2+l2+1,l4+1,m4+l4+1, L+1]
+
+
+        for ind = 1:Mp1
+            ret += VH[i1,i2,L+1,ind] * RR[i3,i4,ind] * sym_factor[L+1]
+        end
+
+        #ret += 1.0
+        
+    end
+
+
+    return ret
+
+end
+    
 
 function matrix_coulomb_small(dat, nlms1, nlms2, nlms3, nlms4)
 
@@ -240,7 +338,7 @@ function gen_basis(dat,  energy_max, nmax)
 
     val_dn = zeros(Int64, 0,4)
     cond_dn = zeros(Int64, 0,4)
-    
+
     for spin = 1:dat.nspin
         for l = 0:dat.lmax
             for m = -l:l
@@ -330,7 +428,7 @@ function generate_excitations(nexcite, nup, ndn, val_up, val_dn, cond_up, cond_d
                     counter += 1
                     v_up[counter,:] .= v_up_t[i,:]
                     v_dn[counter,:] .= v_dn_t[j,:]
-                    println("counter $counter $(v_up[counter,:]) $(v_dn[counter,:])")
+#                    println("counter $counter $(v_up[counter,:]) $(v_dn[counter,:])")
                     #                    v_up = vcat(v_up,v_up_t[i,:]')
                     #                    v_dn = vcat(v_dn,v_dn_t[j,:]')
                 end
@@ -405,6 +503,26 @@ function construct_ham(dat, nexcite; energy_max = 1000000000000.0, nmax = 100000
     s_up = [val_up; cond_up]
     s_dn = [val_dn; cond_dn]
 
+    #println("precalc")
+    @time VH, RR, basis_dict = precalc(dat, [s_up;s_dn])
+    #println("done precalc")
+
+    if false
+        aa1 = [1,0,0,1] #,[1,0,0,1], [1,0,0,1], [1,0,0,1]
+        println("before xxx")
+        @time    ret = matrix_coulomb_small_precalc(dat,aa1,aa1,aa1,aa1, basis_dict, VH, RR)
+        println("after xxx")
+        @time    ret2 =  matrix_coulomb_small(dat, [1,0,0,1] ,[1,0,0,1], [1,0,0,1], [1,0,0,1])
+        println("test $ret vs $ret2")
+        
+        @time    ret = matrix_coulomb_small_precalc(dat,[1,0,0,1] ,[1,0,0,1], [2,0,0,1], [2,0,0,1], basis_dict, VH, RR)
+        
+        @time ret2 =  matrix_coulomb_small(dat, [1,0,0,1] ,[1,0,0,1], [2,0,0,1], [2,0,0,1])
+        
+        println("test $ret vs $ret2")
+
+    end
+    
 #    println( size(s_up) )
 #    println( size(val_up) )
 #    println( size(cond_up) )
@@ -426,8 +544,16 @@ function construct_ham(dat, nexcite; energy_max = 1000000000000.0, nmax = 100000
 #        println("b $i   $(basis_up[i,:])  $(basis_dn[i,:])")
 #    end
     
-    ham = make_ham(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, dense=dense)
-    return ham
+#    ham = missing
+#    @time @suppress begin
+#        ham = make_ham(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn,  dense=dense)
+#    end
+    ham_pre = missing 
+    @time @suppress begin
+        ham_pre = make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_dict, VH, RR, dense=dense)
+    end
+    #return ham[end], ham_pre[end]
+    return ham_pre
 end
 
 function make_ham(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn; dense=false)
@@ -483,9 +609,9 @@ function make_ham(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn; dense=false)
                 end
             end
             if abs(h) > 1e-10
-                if (i == 2 || i == 6 ) && j == 25
-                    println("add IJ $i $j $h $sign")
-                end
+#                if (i == 2 || i == 6 ) && j == 25
+#                    println("add IJ $i $j $h $sign")
+#                end
 
                 push!(ArrI, i)
                 push!(ArrJ, j)
@@ -503,8 +629,92 @@ function make_ham(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn; dense=false)
 #    end
     
     H = sparse(ArrI, ArrJ, ArrH)
-    println(["IJ ",H[2,25], H[6,25]])
-    println(["IJ ",H[25,2], H[25,6]])
+#    println(["IJ ",H[2,25], H[6,25]])
+#    println(["IJ ",H[25,2], H[25,6]])
+    H = 0.5*(H + H')
+    if dense
+        H = collect(H)
+    end
+
+    return     ArrI, ArrJ, ArrH, H
+
+end
+
+function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_dict, VH, RR; dense=false)
+
+    N = size(basis_up,1)
+    ArrI = Int64[]
+    ArrJ = Int64[]
+    ArrH = Float64[]
+    sign = 1.0
+    h = 0.0
+    @time for i = 1:N
+        for j = 1:N
+#            println()
+            count_up, locs_up = find_diff(basis_up[i,:], basis_up[j,:])
+            count_dn, locs_dn = find_diff(basis_dn[i,:], basis_dn[j,:])
+
+            
+            sign = 1.0
+#            println("i $i j $j count $([count_up, count_dn]) $(basis_up[i,:])$(basis_dn[i,:]) ,   $(basis_up[j,:])$(basis_dn[j,:]) lup $locs_up ldn $locs_dn")
+#            continue
+            h=0.0
+
+                if count_up == 0 && count_dn == 0
+                    h = matrix_el_0_precalc(dat, s_up, s_dn, (@view basis_up[i,:]), (@view basis_dn[i,:]), basis_dict, VH, RR)
+                end
+
+                if count_up == 2 && count_dn == 0
+                    h = matrix_el_1_samespin_precalc(dat, s_up, (@view basis_up[i,:]), s_dn, (@view basis_dn[i,:]), locs_up, basis_dict, VH, RR)
+                    sign = (-1.0)^sum(basis_up[i,:][minimum(locs_up)+1:maximum(locs_up)-1])
+
+                end
+                if count_up == 0 && count_dn == 2
+                    h = matrix_el_1_samespin_precalc(dat, s_dn, (@view basis_dn[i,:]), s_up, (@view basis_up[i,:]), locs_dn, basis_dict, VH, RR)
+                    sign = (-1.0)^sum(basis_dn[i,:][minimum(locs_dn)+1:maximum(locs_dn)-1])
+                end
+                if count_up == 2 && count_dn == 2
+                    
+                    h = matrix_el_2_diffspin_precalc(dat, s_up, s_dn, locs_up, locs_dn, basis_dict, VH, RR)
+                    sign =      (-1.0)^sum( basis_up[i,:][minimum(locs_up)+1:maximum(locs_up)-1])
+                    sign = sign*(-1.0)^sum( basis_dn[j,:][minimum(locs_dn)+1:maximum(locs_dn)-1])
+
+                    if (i == 2 || i == 6 ) && j == 25
+                        println("IJ $i $j $h $sign")
+                    end
+                    
+                end
+            if false                
+                if count_up == 4 && count_dn == 0
+                    h = matrix_el_2_samespin(dat, s_up, locs_up)
+                end
+                if count_up == 0 && count_dn == 4
+                    h = matrix_el_2_samespin(dat, s_dn, locs_dn)                
+                end
+            end
+            if abs(h) > 1e-10
+#                if (i == 2 || i == 6 ) && j == 25
+#                    println("add IJ $i $j $h $sign")
+#                end
+
+                push!(ArrI, i)
+                push!(ArrJ, j)
+                push!(ArrH, h*sign)
+
+            end
+            
+        end
+#        println()
+        
+    end
+
+#    for (h,i,j) in zip(ArrH, ArrI, ArrJ)
+#        println("test $h    $i $j")
+#    end
+    
+    H = sparse(ArrI, ArrJ, ArrH)
+#    println(["IJ ",H[2,25], H[6,25]])
+#    println(["IJ ",H[25,2], H[25,6]])
     H = 0.5*(H + H')
     if dense
         H = collect(H)
@@ -637,26 +847,155 @@ function matrix_el_0(dat, s_up, s_dn,b_up, b_dn)
     return h
 end
 
+function matrix_el_0_precalc(dat, s_up, s_dn,b_up, b_dn, basis_dict, VH, RR)
+
+#    println("b_up ", b_up)
+#    println("b_dn ", b_dn)
+#    println()
+#    return 0.0, 0.0
+    h = 0.0
+    for (c,v) = enumerate(b_up)
+#        println("c $c v $v $(s_up[c,:]) ")
+        if v == 1
+#            println("add $c $(s_up[c,:])  ", matrix_twobody_small(dat, s_up[c,:], s_up[c,:])[1])
+            
+            h += matrix_twobody_small(dat, s_up[c,:], s_up[c,:])[1]
+        end
+    end
+    for (c,v) = enumerate(b_dn)
+        if v == 1
+            h += matrix_twobody_small(dat, s_dn[c,:], s_dn[c,:])[1]
+        end
+    end
+
+#    println("h0 $h")
+    #    h=0.0#
+    if true
+        #println("h $h")
+        hh1 = 0.0
+        hh2 = 0.0
+        hh3 = 0.0
+        hh4 = 0.0
+        
+        hex1 = 0.0
+        hex2 = 0.0
+        for (c1,v1) = enumerate(b_up)
+            if v1 == 1
+                for (c2,v2) = enumerate(b_up)
+                    if v2 == 1
+#                        println("c1 $c1 c2 $c2")
+                        #h += ( matrix_coulomb_small(dat, s_up[c1,:], s_up[c1,:], s_up[c2,:], s_up[c2,:]) - matrix_coulomb_small(dat, s_up[c1,:], s_up[c2,:], s_up[c1,:], s_up[c2,:]))
+
+                        #hartree only
+                        hh1 += ( matrix_coulomb_small_precalc(dat, (@view s_up[c1,:]), (@view s_up[c1,:]), (@view s_up[c2,:]), (@view s_up[c2,:]), basis_dict, VH, RR ))
+#                        println("h1 c1 $c1 c2 $c2 sup $(s_up[c1,:]) $(s_up[c2,:])")
+                        #ex only
+                        hex1 += ( - matrix_coulomb_small_precalc(dat, (@view s_up[c1,:]), (@view s_up[c2,:]), (@view s_up[c1,:]),(@view s_up[c2,:]), basis_dict, VH, RR ))
+
+                    end
+                end
+            end
+        end
+        
+#        println("h $h")
+        
+        for (c1,v1) = enumerate(b_dn)
+            if v1 == 1
+                for (c2,v2) = enumerate(b_dn)
+                    if v2 == 1
+
+                        #h += ( matrix_coulomb_small(dat, s_dn[c1,:], s_dn[c1,:], s_dn[c2,:], s_dn[c2,:]) - matrix_coulomb_small(dat, s_dn[c1,:], s_dn[c2,:], s_dn[c1,:], s_dn[c2,:]))
+
+                        #hartree only
+                        hh2 += ( matrix_coulomb_small_precalc(dat, (@view s_dn[c1,:]), (@view s_dn[c1,:]), (@view s_dn[c2,:]), (@view s_dn[c2,:]), basis_dict, VH, RR ))
+
+                        #ex only
+                        hex2 += (  - matrix_coulomb_small_precalc(dat, (@view s_dn[c1,:]), (@view s_dn[c2,:]), (@view s_dn[c1,:]), (@view s_dn[c2,:]), basis_dict, VH, RR ))
+                    end
+                end
+            end
+        end
+#        println("h $h")
+
+        if true
+            for (c1,v1) = enumerate(b_up)
+                if v1 == 1
+                    for (c2,v2) = enumerate(b_dn)
+                        if v2 == 1
+                            hh3 += ( matrix_coulomb_small_precalc(dat, (@view s_up[c1,:]), (@view s_up[c1,:]), (@view s_dn[c2,:]), (@view s_dn[c2,:]), basis_dict, VH, RR )) #- matrix_coulomb_small(dat, s_up[c1,:], s_dn[c2,:], s_up[c1,:], s_dn[c2,:])
+                        end
+                    end
+                end
+            end
+#            println("h $h")
+            for (c1,v1) = enumerate(b_up)
+                if v1 == 1
+                    for (c2,v2) = enumerate(b_dn)
+                        if v2 == 1
+                            hh4 += ( matrix_coulomb_small_precalc(dat, (@view s_dn[c2,:]), (@view s_dn[c2,:]), (@view s_up[c1,:]), (@view s_up[c1,:]), basis_dict, VH, RR )) #- ( matrix_coulomb_small(dat, s_dn[c2,:], s_dn[c2,:], s_up[c1,:], s_up[c1,:]))
+                        end
+                    end
+                end
+            end
+        end
+        h += (hh1 + hh2 + hh3 + hh4 + hex1 + hex2)
+#        println("hh $hh1 $hh2 $hh3 $hh4  hex $hex1 $hex2  tot $h ")
+        
+    end
+    
+    return h
+end
+
 function matrix_el_1_samespin(dat, s, b, s2, b2, loc)
 
     h = matrix_twobody_small(dat, s[loc[1],:], s[loc[2],:])[1]
 #    println("h0 $h")
     for (c1,v1) = enumerate(b)
         if v1 == 1
-            h += 2.0*( matrix_coulomb_small(dat, s[c1,:], s[c1,:], s[loc[1],:], s[loc[2],:]) )
+            h += 2.0*( matrix_coulomb_small(dat, (@view s[c1,:]), (@view s[c1,:]), (@view s[loc[1],:]), (@view s[loc[2],:]) ) )
         end
     end
 #    println("h same hartree $h")
     for (c1,v1) = enumerate(b)
         if v1 == 1
-            h += 2.0*(  - matrix_coulomb_small(dat, s[loc[1],:], s[c1,:], s[loc[2],:], s[c1,:]))
+            h += 2.0*(  - matrix_coulomb_small(dat, (@view s[loc[1],:]), (@view s[c1,:]), (@view s[loc[2],:]), (@view s[c1,:]) ))
         end
     end
 #    println("h same x $h")
 
     for (c2,v2) = enumerate(b2)
         if v2 == 1
-            h += 2.0*( matrix_coulomb_small(dat, s[loc[1],:], s[loc[2],:], s2[c2,:], s2[c2,:])) 
+            h += 2.0*( matrix_coulomb_small(dat, (@view s[loc[1],:]), (@view s[loc[2],:]), (@view s2[c2,:]), (@view s2[c2,:]))) 
+        end
+    end
+#    println("h diff x $h")
+#    println()
+ #   println("h1 $h")
+
+    return h
+    
+end
+
+function matrix_el_1_samespin_precalc(dat, s, b, s2, b2, loc, basis_dict, VH, RR )
+
+    h = matrix_twobody_small(dat, s[loc[1],:], s[loc[2],:])[1]
+#    println("h0 $h")
+    for (c1,v1) = enumerate(b)
+        if v1 == 1
+            h += 2.0*( matrix_coulomb_small_precalc(dat, (@view s[c1,:]), (@view s[c1,:]), (@view s[loc[1],:]), (@view s[loc[2],:]), basis_dict, VH, RR ) )
+        end
+    end
+#    println("h same hartree $h")
+    for (c1,v1) = enumerate(b)
+        if v1 == 1
+            h += 2.0*(  - matrix_coulomb_small_precalc(dat, (@view s[loc[1],:]), (@view s[c1,:]), (@view s[loc[2],:]), (@view s[c1,:]), basis_dict, VH, RR ))
+        end
+    end
+#    println("h same x $h")
+
+    for (c2,v2) = enumerate(b2)
+        if v2 == 1
+            h += 2.0*( matrix_coulomb_small_precalc(dat, (@view s[loc[1],:]), (@view s[loc[2],:]), (@view s2[c2,:]), (@view s2[c2,:]), basis_dict, VH, RR )) 
         end
     end
 #    println("h diff x $h")
@@ -696,6 +1035,24 @@ function  matrix_el_2_diffspin(dat, s_up, s_dn, locs_up, locs_dn)
 #    println(s_dn[locs_dn[2],:])
 
     h = 2.0*( matrix_coulomb_small(dat, s_up[locs_up[1],:], s_up[locs_up[2],:], s_dn[locs_dn[1],:], s_dn[locs_dn[2],:]))
+
+    #h = 2.0*( matrix_coulomb_small(dat, s_up[locs_up[1],:], s_dn[locs_dn[1],:], s_up[locs_up[2],:], s_dn[locs_dn[2],:]))
+    
+    #    if locs_up[1] == 1 && locs_dn[1] == 1 && locs_up[2] == 5 && locs_dn[2] == 5 && abs(h) > 1e-10
+    #        println("diff 2_diffspin $locs_up $locs_dn  s $s_up $s_dn   h $h")
+    #    end
+    return h
+    
+end
+
+function  matrix_el_2_diffspin_precalc(dat, s_up, s_dn, locs_up, locs_dn, basis_dict, VH, RR )
+
+#    println(s_up[locs_up[1],:])
+#    println(s_up[locs_up[2],:])
+#    println(s_dn[locs_dn[1],:])
+#    println(s_dn[locs_dn[2],:])
+
+    h = 2.0*( matrix_coulomb_small_precalc(dat, (@view s_up[locs_up[1],:]), (@view s_up[locs_up[2],:]), (@view s_dn[locs_dn[1],:]),( @view s_dn[locs_dn[2],:]), basis_dict, VH, RR ))
 
     #h = 2.0*( matrix_coulomb_small(dat, s_up[locs_up[1],:], s_dn[locs_dn[1],:], s_up[locs_up[2],:], s_dn[locs_dn[2],:]))
     
