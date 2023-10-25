@@ -328,9 +328,9 @@ function calc_energy_exx(VX_LM, VECTS, filling, g, N, M, mix_lm, lmax, nspin, bi
                         
                         fillval = filling[n, spin, l1+1, l1+m1+1]
                         #fix1
-                        #                        if fillval < 1e-20
-#                            break
-#                        end
+                        if fillval < 1e-20
+                            break
+                        end
                         e_exx += 0.5*fillval*VECTS[:,n,spin, l1+1, l1+m1+1]' * v *  VECTS[:,n,spin, l1+1, l1+m1+1]
                     end
                 end
@@ -346,9 +346,9 @@ function calc_energy_exx(VX_LM, VECTS, filling, g, N, M, mix_lm, lmax, nspin, bi
                     for (n_count, n_code) in enumerate(nlist)
                         fillval = filling[n_count,spin,l+1,m+l+1]
                         #fix1
-                        #                        if fillval < 1e-20
-#                            continue
-#                        end
+                        if fillval < 1e-20
+                            continue
+                        end
                         for l1 = 0:(lmax)
                             for m1 = -l1:l1
                                 ind1 = (1:Nsmall) .+ Nsmall*lm_dict[(l1,m1)]
@@ -1086,9 +1086,9 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
                     #                    println("add fillval $spin $l $m ", fillval)
 
                     #fix1
-#                    if fillval < 1e-20
-#                        break
-#                    end
+                    if fillval < 1e-20
+                        break
+                    end
 
                     #                    println("VECTS ", size(VECTS[:, n, spin, l+1,l+1+m]))
 #                    t = gal_rep_to_rspace(VECTS[:, n, spin, l+1,l+1+m], g, M=M)
@@ -1369,9 +1369,9 @@ function get_rho_big(VALS, VECTS_big, nel, filling, nspin, lmax, lmaxrho, N, M, 
                     fillval = filling[c_n, spin, l+1, l+m+1]
                     #                    println("add fillval $spin $l $m ", fillval)
                     #fix1
-                    #                    if fillval < 1e-20
-#                        continue
-#                    end
+                    if fillval < 1e-20
+                        continue
+                    end
                     for c1 = 1:length(lm_dict)
                         (ll1,mm1) = dict_lm[c1]
 #                        t1 = gal_rep_to_rspace(VECTS_big[(1:(N-1)).+(c1-1)*(N-1), n, spin], g, M=M)
@@ -2386,9 +2386,9 @@ function vxx_LM5(VX_LM2, mat_n2m, mat_m2n, R, LINOP, g, N, M, lmaxrho, lmax, gbv
                     
                     f = filling[n,spin,l+1,m+l+1]
                     #fix1
-#                    if f < 1e-20
-#                        break
-#                    end
+                    if f < 1e-20
+                        break
+                    end
                     t .= real(mat_n2m*(@view VECTS[:,n,spin,l+1, m+l+1]))
                     tf1 .=  t ./ R  / sqrt(g.b-g.a) * sqrt(2 )
                     mt .= mat_n2m'*diagm(tf1)
@@ -3705,9 +3705,9 @@ function get_t2(VECTS, mat_n2m, mat_m2n, N, M, nspin, lmax)
                     fillval = filling[n, spin, l+1, l+m+1]
                     #                    println("add fillval $spin $l $m ", fillval)
                     #fix1
-#                    if fillval < 1e-20
-#                        break
-#                    end
+                    if fillval < 1e-20
+                        break
+                    end
                     t = mat_n2m * VECTS[:, n, spin, l+1,l+1+m]
                     t2[:,n,spin, l+1, l+m+1] = t*conj(t) * fillval
                 end
