@@ -58,7 +58,7 @@ function matrix_coulomb_small_old(dat, nlms1, nlms2, nlms3, nlms4)
 
 end
 
-function precalc_twobody(dat, s)
+function precalc_twobody(dat, s, Z0)
 
     ns = size(s)[1]
     H_2bdy = zeros(ns, ns)
@@ -66,7 +66,7 @@ function precalc_twobody(dat, s)
         #        n1,l1,m1,s1 = s[i1,:]
         for i2 in 1:ns
             #            n2,l2,m2,s2 = s[i2,:]
-            H_2bdy[i1,i2] = matrix_twobody_small(dat, s[i1,:], s[i2,:])[1]
+            H_2bdy[i1,i2] = matrix_twobody_small(dat, s[i1,:], s[i2,:], Z0)[1]
         end
     end
     return H_2bdy
@@ -306,7 +306,7 @@ function matrix_twobody_small_precalc(nlms1, nlms2, basis_dict, H_2bdy)
 end
 
 
-function matrix_twobody_small(dat, nlms1, nlms2)
+function matrix_twobody_small(dat, nlms1, nlms2, Z0)
 
     l1 = nlms1[2]
     l2 = nlms2[2]
@@ -340,7 +340,7 @@ function matrix_twobody_small(dat, nlms1, nlms2)
 
     #real_gaunt_dict[(0,0,l1,m1,l1,m2)]*sqrt(4*pi)*
     
-    return v2'*(dat.V_C  +  dat.D2 + dat.V_L*l1*(l1+1)) * v1, v2'*dat.S*v1
+    return v2'*(dat.V_C*Z0  +  dat.D2 + dat.V_L*l1*(l1+1)) * v1, v2'*dat.S*v1
 
 end
 
@@ -588,7 +588,7 @@ function gen_combos( nex, nval, ncond)
 end
 
 
-function construct_ham(dat, nexcite; energy_max = 1000000000000.0, nmax = 1000000, dense=false, symmetry=false)
+function construct_ham(dat, nexcite; energy_max = 1000000000000.0, nmax = 1000000, dense=false, symmetry=false, Z0=1.0)
 
     if dat.nspin == 1
         println("ERROR - need 2 spins")
@@ -615,7 +615,7 @@ function construct_ham(dat, nexcite; energy_max = 1000000000000.0, nmax = 100000
     println("precalc")
     @time VH, RR, basis_dict = precalc_coulomb(dat, [s_up;s_dn])
     println("precalc 2bdy")
-    @time H_2bdy = precalc_twobody(dat, [s_up;s_dn])
+    @time H_2bdy = precalc_twobody(dat, [s_up;s_dn], Z0)
     #return H_2bdy
     #println("done precalc")
 
@@ -664,7 +664,7 @@ function construct_ham(dat, nexcite; energy_max = 1000000000000.0, nmax = 100000
     ham_pre = missing 
     println("make_ham_precalc")
     @time  begin #@suppress
-        ham_pre = make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_dict, VH, RR, H_2bdy, dense=dense, symmetry=symmetry)
+        ham_pre = make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_dict, VH, RR, H_2bdy, dense=dense, symmetry=symmetry, Z0=Z0)
     end
     #return ham[end], ham_pre[end]
     return ham_pre
@@ -756,7 +756,7 @@ end
 
 
 
-function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_dict, VH, RR, H_2bdy; dense=false, symmetry=false)
+function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_dict, VH, RR, H_2bdy; dense=false, symmetry=false, Z0=1.0)
 
 
 
@@ -816,6 +816,18 @@ function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_d
                 if abs(htemp) > 1e-8
                     check = true
                 end
+            elseif count_up == 4 && count_dn == 0
+                println("same spin up $i $j")
+                htemp = matrix_el_2_samespin_precalc(dat, s_up, locs_up, basis_dict, VH, RR)
+                if abs(htemp) > 1e-8
+                    check = true
+                end
+            elseif count_up == 0 && count_dn == 4
+                println("same spin dn $i $j")
+                htemp = matrix_el_2_samespin_precalc(dat, s_dn, locs_dn, basis_dict, VH, RR)
+                if abs(htemp) > 1e-8
+                    check = true
+                end
             end
             if check == true
                 push!(good_list, j)
@@ -827,7 +839,8 @@ function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_d
     else
         println("symmetry $symmetry keep ", length(good_list))
     end        
-    @threads for ii = 1:length(good_list) #1:N
+    #@THREADS
+    for ii = 1:length(good_list) #1:N
         i = good_list[ii]
         id = threadid()
         htemp = 0.0 #for some reason the variable name h was causing problems with threads
@@ -884,18 +897,18 @@ function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_d
                 #            continue
                 if count_up == 0 && count_dn == 0
                     #BBB
-                    htemp = matrix_el_0_precalc(dat, s_up, s_dn, (@view basis_up[i,:]), (@view basis_dn[i,:]), basis_dict, VH, RR, H_2bdy)
+                    htemp = matrix_el_0_precalc(dat, s_up, s_dn, (@view basis_up[i,:]), (@view basis_dn[i,:]), basis_dict, VH, RR, H_2bdy, Z0)
                     
                 elseif count_up == 2 && count_dn == 0
                     #BBB
-                    htemp = matrix_el_1_samespin_precalc(dat, s_up, (@view basis_up[i,:]), s_dn, (@view basis_dn[i,:]), locs_up, basis_dict, VH, RR, H_2bdy)
+                    htemp = matrix_el_1_samespin_precalc(dat, s_up, (@view basis_up[i,:]), s_dn, (@view basis_dn[i,:]), locs_up, basis_dict, VH, RR, H_2bdy, Z0=Z0)
                     sign = (-1.0)^sum((@view basis_up[i,:])[minimum(@view locs_up[1:2])+1:maximum(@view locs_up[1:2])-1])
 
                     
                     
                 elseif count_up == 0 && count_dn == 2
                     #BBB
-                    htemp = matrix_el_1_samespin_precalc(dat, s_dn, (@view basis_dn[i,:]), s_up, (@view basis_up[i,:]), locs_dn, basis_dict, VH, RR, H_2bdy)
+                    htemp = matrix_el_1_samespin_precalc(dat, s_dn, (@view basis_dn[i,:]), s_up, (@view basis_up[i,:]), locs_dn, basis_dict, VH, RR, H_2bdy, Z0=Z0)
                     sign = (-1.0)^sum((@view basis_dn[i,:])[minimum(@view locs_dn[1:2])+1:maximum( @view locs_dn[1:2])-1])
                 elseif count_up == 2 && count_dn == 2
                     
@@ -907,6 +920,13 @@ function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_d
                     #if (i == 2 || i == 6 ) && j == 25
                     #    println("IJ $i $j $h $sign")
                     #end
+
+                elseif count_up == 4 && count_dn == 0
+                    htemp = matrix_el_2_samespin_precalc(dat, s_up, locs_up, basis_dict, VH, RR)
+
+                elseif count_up == 0 && count_dn == 4
+                    htemp = matrix_el_2_samespin_precalc(dat, s_dn, locs_dn, basis_dict, VH, RR)
+                    
                     
                 end
                 #h = i + j
@@ -975,7 +995,7 @@ function find_diff(v1,v2)
 
     
     count = sum(abs.(v1 - v2))
-    if count >= 4
+    if count >= 5
         return count, Int64[]
     else
         
@@ -1003,7 +1023,7 @@ function find_diff_fast(basis, i,j, basis_tmp, locs_tmp,W)
         count += basis_tmp[c]
     end
     #count = sum(abs.(v1 - v2))
-    if count >= 4
+    if count >= 5
         return count
     else
         locs_tmp .= 0
@@ -1129,21 +1149,21 @@ function matrix_el_0(dat, s_up, s_dn,b_up, b_dn)
     return h
 end
 
-function matrix_el_0_precalc(dat, s_up, s_dn,b_up, b_dn, basis_dict, VH, RR, H_2bdy)
+function matrix_el_0_precalc(dat, s_up, s_dn,b_up, b_dn, basis_dict, VH, RR, H_2bdy, Z0)
 
     #    println("b_up ", b_up)
     #    println("b_dn ", b_dn)
     #    println()
     #    return 0.0, 0.0
     h = 0.0
-    h_test = 0.0
+#    h_test = 0.0
 
     for (c,v) = enumerate(b_up)
         #        println("c $c v $v $(s_up[c,:]) ")
         if v == 1
             #            println("add $c $(s_up[c,:])  ", matrix_twobody_small(dat, s_up[c,:], s_up[c,:])[1])
-            h += matrix_twobody_small(dat, s_up[c,:], s_up[c,:])[1]
-            h_test += matrix_twobody_small_precalc((@view s_up[c,:]), (@view s_up[c,:]), basis_dict, H_2bdy)
+            h += matrix_twobody_small(dat, s_up[c,:], s_up[c,:], Z0)[1]
+#            h_test += matrix_twobody_small_precalc((@view s_up[c,:]), (@view s_up[c,:]), basis_dict, H_2bdy)
         end
     end
 
@@ -1151,7 +1171,7 @@ function matrix_el_0_precalc(dat, s_up, s_dn,b_up, b_dn, basis_dict, VH, RR, H_2
     
     for (c,v) = enumerate(b_dn)
         if v == 1
-            h += matrix_twobody_small(dat, s_dn[c,:], s_dn[c,:])[1]
+            h += matrix_twobody_small(dat, s_dn[c,:], s_dn[c,:], Z0)[1]
         end
     end
 
@@ -1263,7 +1283,7 @@ function matrix_el_1_samespin(dat, s, b, s2, b2, loc)
     
 end
 
-function matrix_el_1_samespin_precalc(dat, s, b, s2, b2, loc, basis_dict, VH, RR, H_2bdy; sym_check=false )
+function matrix_el_1_samespin_precalc(dat, s, b, s2, b2, loc, basis_dict, VH, RR, H_2bdy; sym_check=false, Z0=1.0 )
 
     h = matrix_twobody_small_precalc( s[loc[1],:], s[loc[2],:], basis_dict, H_2bdy)
 
@@ -1380,13 +1400,23 @@ function  matrix_el_2_diffspin_precalc(dat, s_up, s_dn, locs_up, locs_dn, basis_
     
 end
 
-function  matrix_el_2_samespin(dat, s, locs)
-    println("same $locs")
-    h =  2.0*( matrix_coulomb_small(dat, s[locs[1],:], s[locs[3],:], s[locs[2],:], s[locs[4],:]))
-    #h -= 2.0*( matrix_coulomb_small(dat, s[locs[1],:], s[locs[2],:], s[locs[3],:], s[locs[4],:]))
+function  matrix_el_2_samespin_precalc(dat, s, locs, basis_dict, VH, RR )
+
+    println("locs $locs")
+
+    h = 2.0*( matrix_coulomb_small_precalc(dat, ( s[locs[1],:]), ( s[locs[2],:]), ( s[locs[3],:]),(  s[locs[4],:]), basis_dict, VH, RR ))
+    h += - 2.0*( matrix_coulomb_small_precalc(dat, ( s[locs[1],:]), ( s[locs[3],:]), ( s[locs[2],:]),(  s[locs[4],:]), basis_dict, VH, RR ))
+
     return h
-    
 end
+
+#function  matrix_el_2_samespin(dat, s, locs)
+#    println("same $locs")
+#    h =  2.0*( matrix_coulomb_small(dat, s[locs[1],:], s[locs[3],:], s[locs[2],:], s[locs[4],:]))
+    #h -= 2.0*( matrix_coulomb_small(dat, s[locs[1],:], s[locs[2],:], s[locs[3],:], s[locs[4],:]))
+#    return h
+#    
+#end
 
 
 
