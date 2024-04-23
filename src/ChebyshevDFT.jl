@@ -29,7 +29,7 @@ include("Inverse.jl")
 #include("Galerkin.jl")
 #include("GalerkinNEW.jl")
 
-include("GalerkinNEW2.jl")
+include("GalerkinNEW3.jl")
 #include("GalerkinNEWX.jl")
 
 #include("G2.jl")

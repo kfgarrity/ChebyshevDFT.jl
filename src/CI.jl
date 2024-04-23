@@ -5,12 +5,14 @@ using ..GalerkinDFT:get_vect_gal
 using ..GalerkinDFT:get_Svect_gal
 using ..Galerkin:do_1d_integral
 using ..AngularIntegration:real_gaunt_dict
+using ..AngularIntegration:makeleb
 using Combinatorics
 using SparseArrays
 using LoopVectorization
 using Suppressor
 using Base.Threads
 using LinearAlgebra
+using Arpack
 
 function matrix_coulomb_small_old(dat, nlms1, nlms2, nlms3, nlms4)
 
@@ -71,6 +73,225 @@ function precalc_twobody(dat, s, Z0)
     end
     return H_2bdy
 
+end
+
+function dist2(R1,theta1,phi1, R2, theta2, phi2)
+    return (R1^2 + R2 ^2 - 2 * R1 * R2 *(sin(theta1)*sin(theta2)*cos(phi1-phi2) + cos(theta1)*cos(theta2)))
+end
+
+#function dist2(R1,theta1,phi1, R2, theta2, phi2)
+#    return (R1^2 + R2 ^2 - 2 * R1 * R2 *(sin(theta1)*sin(theta2)*cos(phi1-phi2) + cos(theta1)*cos(theta2)))
+#end
+
+function convolve_gaussian(dat, a, lmax, lint,nlms)
+
+    l = nlms[2]
+    m = nlms[3]    
+    vv = get_vect_gal(dat, nlms[1], nlms[2], nlms[3], nlms[4])
+    VV = dat.mat_n2m * vv
+
+    R = dat.R
+
+    #VV2 = VV.^2 ./ R.^2
+
+    
+    @time LEB = makeleb(lint , lmax=lmax)
+    M = dat.M
+    N = dat.N
+    
+    stheta = sin.(LEB.θ[:])
+    sphi = sin.(LEB.ϕ[:])
+
+    ctheta = cos.(LEB.θ[:])
+    cphi = cos.(LEB.ϕ[:])
+
+
+    RA = zeros(M+1,LEB.N )
+
+    f = 1/2/a^2
+    f2 = 1/sqrt(2*pi)^3 / a^3 * (dat.g.b-dat.g.a)/2 * 4*pi
+
+    VV2 = exp.(-R.^2 / 2)
+    
+    @turbo for ntp1 = 1:LEB.N
+#        theta1 = LEB.θ[ntp1]
+        #        phi1 = LEB.ϕ[ntp1]
+
+        for ntp2 = 1:LEB.N
+#            theta2 = LEB.θ[ntp2]
+#            phi2 = LEB.ϕ[ntp2]
+            for r1 = 1:M+1
+                R1 = dat.R[r1]
+                for r2 = 1:M+1
+                    R2 = dat.R[r2]                    
+
+                    dist2 = (R[r1]^2 + R[r2]^2 - 2*R[r1]*R[r2]*(stheta[ntp1]*stheta[ntp2]*(cphi[ntp1]*cphi[ntp2] + sphi[ntp1]*sphi[ntp2]) + ctheta[ntp1]*ctheta[ntp2]))
+                    RA[r1, ntp1] += f2 * VV2[r2]*LEB.Ylm_arr[l+1,m+l+1, ntp2]*exp(-f * dist2 ) * R2^2 * dat.g.w[r2+1,M] * LEB.w[ntp2]
+                end
+            end
+        end
+    end
+
+    return R, RA, VV2
+    
+end
+
+function soft_coulomb(dat, a, lmax, lint)
+
+    #    LEB = dat.LEB
+    @time LEB = makeleb(lint , lmax=lmax )
+    @time LEB2 = makeleb(5 , lmax=lmax )
+
+
+    M = dat.M
+    N = dat.N
+    
+    stheta = sin.(LEB.θ[:])
+    sphi = sin.(LEB.ϕ[:])
+
+    ctheta = cos.(LEB.θ[:])
+    cphi = cos.(LEB.ϕ[:])
+
+    R = dat.R
+    println("ra")
+#    @time RA = zeros(LEB.N, LEB.N, M+1, M+1)
+#=
+    @time @turbo for ntp1 = 1:LEB.N
+
+        
+        #        theta1 = LEB.θ[ntp1]
+#        phi1 = LEB.ϕ[ntp1]
+
+        for ntp2 = 1:LEB.N
+#            theta2 = LEB.θ[ntp2]
+#            phi2 = LEB.ϕ[ntp2]
+            for r1 = 1:M+1
+#                R1 = dat.R[r1]
+                for r2 = 1:M+1
+#                    R2 = dat.R[r2]                    
+                    #                    RA[ntp1, ntp2, r1,r2] =  1/ sqrt(a^2 + dist2(R1,theta1,phi1, R2, theta2, phi2))
+                    RA[ntp1, ntp2, r1,r2] =  a^2 + R[r1]^2 + R[r2]^2 - 2*R[r1]*R[r2]*(stheta[ntp1]*stheta[ntp2]*(cphi[ntp1]*cphi[ntp2] + sphi[ntp1]*sphi[ntp2]) + ctheta[ntp1]*ctheta[ntp2])
+                    #RA[ntp1, ntp2, r1,r2] =  1.0
+                end
+            end
+        end
+    end
+
+    RA = 1 ./ sqrt.(RA)
+=#
+    #lmaxrho=max(dat.lmaxrho, dat.lmax*2)
+    lmaxrho = lmax
+    println("mem2")
+    @time RA_lm_lm = zeros(lmaxrho+1, 2*lmaxrho+1, lmaxrho+1, 2*lmaxrho+1, M+1, M+1)
+    t=0.0
+#=    @time for l1 = 0:lmaxrho
+        for m1 = -l1:l1
+            for l2 = 0:lmaxrho
+                for m2 = -l2:l2
+                    @turbo for r1 = 1:M+1
+                        for r2 = 1:M+1
+                            for ntp1 = 1:LEB.N
+                                for ntp2 = 1:LEB.N
+                                    RAT = 1/sqrt( a^2 + R[r1]^2 + R[r2]^2 - 2*R[r1]*R[r2]*(stheta[ntp1]*stheta[ntp2]*(cphi[ntp1]*cphi[ntp2] + sphi[ntp1]*sphi[ntp2]) + ctheta[ntp1]*ctheta[ntp2]))
+                                    #RA_lm_lm[l1+1, l1+m1+1, l2+1, l2+m2+1, r1,r2] += (4*pi)*LEB.Ylm_arr[l2+1,m2+l2+1, ntp2]*LEB.Ylm_arr[l1+1,m1+l1+1, ntp1]*RA[ntp1, ntp2, r1,r2] * LEB.w[ntp1] * LEB.w[ntp2]
+                                    #t += RA[ntp1, ntp2, r1,r2] * LEB.w[ntp1] * LEB.w[ntp2] * exp(-R[r1])^2 * exp(-R[r2])^2 * dat.g.w[r1+1,M] * dat.g.w[r2+1,M] * R[r1]^2 *  R[r2]^2
+                                    t += RAT * LEB.w[ntp1] * LEB.w[ntp2] * exp(-R[r1])^2 * exp(-R[r2])^2 * dat.g.w[r1+1,M] * dat.g.w[r2+1,M] * R[r1]^2 *  R[r2]^2
+                                    #t +=  LEB.w[ntp1] * LEB.w[ntp2] * dat.g.w[r1+1,M] * dat.g.w[r2+1,M] * R[r1]^2 *  R[r2]^2
+
+                                    
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+=#
+    t2 = 0.0
+    ntp2 = 1
+    t1 = 0.0
+    #    @time for l1 = 0:lmaxrho
+#        for m1 = -l1:l1
+#            for l2 = 0:lmaxrho
+#                for m2 = -l2:l2
+  #                  @tturbo for r1 = 1:M+1
+  #                      for r2 = 1:M+1
+  #                          for ntp1 = 1:LEB.N
+#                                for ntp2 = 1:LEB2.N
+                                #RAT = 1/sqrt( a^2 + R[r1]^2 + R[r2]^2 - 2*R[r1]*R[r2]*(stheta[ntp1]*stheta[ntp2]*(cphi[ntp1]*cphi[ntp2] + sphi[ntp1]*sphi[ntp2]) + ctheta[ntp1]*ctheta[ntp2]))
+                                    #RA_lm_lm[l1+1, l1+m1+1, l2+1, l2+m2+1, r1,r2] += (4*pi)*LEB.Ylm_arr[l2+1,m2+l2+1, ntp2]*LEB.Ylm_arr[l1+1,m1+l1+1, ntp1]*RA[ntp1, ntp2, r1,r2] * LEB.w[ntp1] * LEB.w[ntp2]
+                                    #t += RA[ntp1, ntp2, r1,r2] * LEB.w[ntp1] * LEB.w[ntp2] * exp(-R[r1])^2 * exp(-R[r2])^2 * dat.g.w[r1+1,M] * dat.g.w[r2+1,M] * R[r1]^2 *  R[r2]^2
+#                                    t2 += RAT * LEB.w[ntp1]  * exp(-R[r1])^2 * exp(-R[r2])^2 * dat.g.w[r1+1,M] * dat.g.w[r2+1,M] * R[r1]^2 *  R[r2]^2 
+                                    #t +=  LEB.w[ntp1] * LEB.w[ntp2] * dat.g.w[r1+1,M] * dat.g.w[r2+1,M] * R[r1]^2 *  R[r2]^2
+#                                dist = R[r1]^2 + R[r2]^2 - 2*R[r1]*R[r2]*(stheta[ntp1]*stheta[ntp2]*(cphi[ntp1]*cphi[ntp2] + sphi[ntp1]*sphi[ntp2]) + ctheta[ntp1]*ctheta[ntp2])
+#                                t += LEB.w[ntp1]* dat.g.w[r1+1,M] * dat.g.w[r2+1,M] * R[r1]^2 *  R[r2]^2 * exp(-dist^2 / a^2)
+#                                t += LEB.w[ntp1]* dat.g.w[r1+1,M] * dat.g.w[r2+1,M] *  R[r1]^2 * exp(-dist^2 / a^2) 
+ #                               end
+ #                           end
+#                        end
+#                    end
+#                end
+#            end
+#        end
+#    end
+    t = 0.0
+    @tturbo for r1 = 1:M+1
+        for ntp1 = 1:LEB.N
+
+            t += LEB.w[ntp1]* dat.g.w[r1+1,M] *  R[r1]^2 * exp(-0.5*R[r1]^2 / a^2) / a^3 / sqrt(2*pi)^3
+        end
+    end
+
+
+    t2 = 0.0
+    @tturbo for r1 = 1:M+1
+        for ntp1 = 1:LEB.N
+            for r2 = 1:M+1
+                for ntp2 = 1:LEB.N
+                    dist2 = R[r1]^2 + R[r2]^2 - 2*R[r1]*R[r2]*(stheta[ntp1]*stheta[ntp2]*(cphi[ntp1]*cphi[ntp2] + sphi[ntp1]*sphi[ntp2]) + ctheta[ntp1]*ctheta[ntp2])
+                    #t2 += LEB.w[ntp1]* dat.g.w[r1+1,M] *  R[r1]^2 * exp(-0.5*R[r1]^2 / a^2) / a^3 / sqrt(2*pi)^3 * LEB.w[ntp2]* dat.g.w[r2+1,M] *  R[r2]^2 * exp(-0.5*R[r2]^2 / a^2) / a^3 / sqrt(2*pi)^3
+                    t2 += LEB.w[ntp1]* dat.g.w[r1+1,M] *  R[r1]^2 * exp(-0.5*R[r1]^2 / a^2) / a^3 / sqrt(2*pi)^3 * LEB.w[ntp2]* dat.g.w[r2+1,M] *  R[r2]^2 * exp(-0.5*dist2 / a^2) / a^3 / sqrt(2*pi)^3
+                end
+            end
+        end
+    end
+    
+    return t * ( (dat.g.b - dat.g.a) / 2 * (4*pi)), t2* ( (dat.g.b - dat.g.a) / 2 * (4*pi))^2
+#    return RA, RA_lm_lm
+    #   println("test ", RA_lm_lm[1] - RA[1], " " , [RA_lm_lm[1] , RA[1]])
+    
+    
+    RA_lm_lm_NN = zeros(lmaxrho+1, 2*lmaxrho+1, lmaxrho+1, 2*lmaxrho+1, N-1, N-1)
+    t = 0.0
+    @time for l1 = 0:lmaxrho
+        for m1 = -l1:l1
+            for l2 = 0:lmaxrho
+                for m2 = -l2:l2
+                    @tturbo for n1 = 1:(N-1)
+                        for n2 = 1:(N-1)
+                            for r1 = 1:M+1
+                                for r2 = 1:M+1
+                                    #                                    RA_lm_lm_NN[l1+1, l1+m1+1, l2+1, l2+m2+1, n1, n2] += dat.g.bvals[r1+1,n1,M] * dat.g.bvals[r2+1,n2,M] * RA_lm_lm[l1+1, l1+m1+1, l2+1, l2+m2+1, r1,r2] * dat.g.w[r1+1,M] * dat.g.w[r2+1,M]
+#                                    t += RA_lm_lm[l1+1, l1+m1+1, l2+1, l2+m2+1, r1,r2] * dat.g.w[r1+1,M] * dat.g.w[r2+1,M] * exp(-R[r1])^2 * exp(-R[r2])^2
+                                    
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    println("t $t")
+    return t
+#    RA = RA  / (dat.g.b- dat.g.a)^4 * 2^2
+#    RA_lm_lm = RA_lm_lm  / (dat.g.b- dat.g.a)^4 * 2^4
+#    RA_lm_lm_NN = RA_lm_lm_NN  / (dat.g.b- dat.g.a)^4 * 2^4
+    
+    return RA, RA_lm_lm, RA_lm_lm_NN
+    
 end
 
 function precalc_coulomb(dat, s)
@@ -346,12 +567,6 @@ end
 
 function gen_basis(dat,  energy_max, nmax)
 
-    if typeof(nmax) == Int64
-        nmax = nmax * ones(Int64, dat.lmax+1)
-        for n in 1:dat.lmax
-            nmax[n+1] = nmax[n+1] - 1
-        end
-    end
     
     nup = Int64(sum( dat.nel[1,:,:]))
     ndn = Int64(sum( dat.nel[2,:,:]))
@@ -403,10 +618,10 @@ function gen_basis(dat,  energy_max, nmax)
         for l = 0:dat.lmax
             for m = -l:l
                 #for n = 1:max(min(dat.N-1, nmax[l+1]), n_occ_max)
-                println("add $l $m $(nmax[l+1])")
+#                println("add $l $m $(nmax[l+1])")
                 for n = 1:min(dat.N-1,nmax[l+1])
                     
-                    println("add basis spin $spin l $l m $m n $n")
+#                    println("add basis spin $spin l $l m $m n $n")
                     #                    println("add ", [n, spin, l+1, l+m+1], " ", dat.VALS[n, spin, l+1, l+m+1], " " , ground_state[n,spin, l+1, l+m+1])
                     if dat.VALS[n, spin, l+1, l+m+1] > energy_max
                         continue
@@ -592,11 +807,11 @@ function construct_ham(dat, nexcite; energy_max = 1000000000000.0, nmax = 100000
 
     if dat.nspin == 1
         println("ERROR - need 2 spins")
-        return Nothing
+        return nothing
     end
     if abs(sum(dat.nel) - sum(round.(dat.nel))) > 1e-10
         println("ERROR - need integer number of electrons")
-        return Nothing
+        return nothing
     end
 
     nel = Int64(sum(dat.nel))
@@ -652,10 +867,10 @@ function construct_ham(dat, nexcite; energy_max = 1000000000000.0, nmax = 100000
     println("generate ex")
     @time basis_up, basis_dn = generate_excitations(nexcite,nup, ndn, val_up, val_dn, cond_up, cond_dn, qnums_gs, symmetry, s_up, s_dn)
 
-    #    println("basis_up ")
-    #    for i = 1:size(basis_up,1)
-    #        println("b $i   $(basis_up[i,:])  $(basis_dn[i,:])")
-    #    end
+#        println("basis_up dn")
+#        for i = 1:size(basis_up,1)
+#            println("b $i   $(basis_up[i,:])  $(basis_dn[i,:])")
+#        end
     
     #    ham = missing
     #    @time @suppress begin
@@ -664,10 +879,10 @@ function construct_ham(dat, nexcite; energy_max = 1000000000000.0, nmax = 100000
     ham_pre = missing 
     println("make_ham_precalc")
     @time  begin #@suppress
-        ham_pre = make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_dict, VH, RR, H_2bdy, dense=dense, symmetry=symmetry, Z0=Z0)
+        ArrI, ArrJ, ArrH, H = make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_dict, VH, RR, H_2bdy, dense=dense, symmetry=symmetry, Z0=Z0)
     end
     #return ham[end], ham_pre[end]
-    return ham_pre
+    return ArrI, ArrJ, ArrH, H, basis_up, basis_dn, s_up, s_dn
 end
 
 function make_ham(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn; dense=false)
@@ -709,9 +924,9 @@ function make_ham(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn; dense=false)
                 sign =      (-1.0)^sum( basis_up[i,:][minimum(locs_up)+1:maximum(locs_up)-1])
                 sign = sign*(-1.0)^sum( basis_dn[j,:][minimum(locs_dn)+1:maximum(locs_dn)-1])
 
-                if (i == 2 || i == 6 ) && j == 25
-                    println("IJ $i $j $h $sign")
-                end
+#                if (i == 2 || i == 6 ) && j == 25
+#                    println("IJ $i $j $h $sign")
+#                end
                 
             end
             if false                
@@ -789,11 +1004,15 @@ function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_d
 
     locs_up_threads = zeros(Int64,4, nthreads())
     locs_dn_threads = zeros(Int64,4, nthreads())
+    locs_up = zeros(Int64,4)
+    locs_dn = zeros(Int64,4)
     W=size(basis_up,2)
     basis_tmp_threads = zeros(Int64, W, nthreads())
-    basis_tmp_threads = zeros(Int64, W, nthreads())    
+    basis_tmp_threads2 = zeros(Int64, W, nthreads())    
 
-    if symmetry==false
+
+    println("symmetry part")
+    @time if symmetry==false
         good_list = 1:N
     else
         i_ind = 1
@@ -804,8 +1023,8 @@ function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_d
             locs_dn = @view locs_dn_threads[:,id]
             basis_tmp = @view basis_tmp_threads[:,id]
 
-            count_up = find_diff_fast(basis_up, i_ind, j, basis_tmp, locs_up, W)
-            count_dn = find_diff_fast(basis_dn, i_ind, j, basis_tmp, locs_dn, W)
+            count_up, sign_up = find_diff_fast(basis_up, i_ind, j, basis_tmp, locs_up, W)
+            count_dn, sign_dn = find_diff_fast(basis_dn, i_ind, j, basis_tmp, locs_dn, W)
             check = false
             if count_up == 2 && count_dn == 0
                 check = matrix_el_1_samespin_precalc_sym(dat, s_up, (@view basis_up[i_ind,:]), s_dn, (@view basis_dn[i_ind,:]), locs_up, basis_dict, VH, RR, H_2bdy)
@@ -817,13 +1036,13 @@ function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_d
                     check = true
                 end
             elseif count_up == 4 && count_dn == 0
-                println("same spin up $i $j")
+                #println("same spin up $i $j")
                 htemp = matrix_el_2_samespin_precalc(dat, s_up, locs_up, basis_dict, VH, RR)
                 if abs(htemp) > 1e-8
                     check = true
                 end
             elseif count_up == 0 && count_dn == 4
-                println("same spin dn $i $j")
+                #println("same spin dn $i $j")
                 htemp = matrix_el_2_samespin_precalc(dat, s_dn, locs_dn, basis_dict, VH, RR)
                 if abs(htemp) > 1e-8
                     check = true
@@ -840,7 +1059,10 @@ function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_d
         println("symmetry $symmetry keep ", length(good_list))
     end        
     #@THREADS
-    for ii = 1:length(good_list) #1:N
+    println("second part")
+    locs_i = zeros(Int64, 2)
+    locs_j = zeros(Int64, 2)
+    @time for ii = 1:length(good_list) #1:N
         i = good_list[ii]
         id = threadid()
         htemp = 0.0 #for some reason the variable name h was causing problems with threads
@@ -849,13 +1071,30 @@ function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_d
             j = good_list[jj]
 
             #            println("thread id $id")
-            locs_up = @view locs_up_threads[:,id]
-            locs_dn = @view locs_dn_threads[:,id]
+            #locs_up = locs_up_threads[:,id]
+            #locs_dn = locs_dn_threads[:,id]
             basis_tmp = @view basis_tmp_threads[:,id]
+            basis_tmp2 = @view basis_tmp_threads2[:,id]
+            
+            #count_up, sign_up = find_diff_fast(basis_up, i, j, basis_tmp, locs_up, W)
+            #count_dn, sign_dn = find_diff_fast(basis_dn, i, j, basis_tmp, locs_dn, W)
 
-            count_up = find_diff_fast(basis_up, i, j, basis_tmp, locs_up, W)
-            count_dn = find_diff_fast(basis_dn, i, j, basis_tmp, locs_dn, W)
-
+#            count_up = 0
+#            count_dn = 0
+            count_up, sign_up = find_diff_fast2(basis_up, i, j, basis_tmp2, locs_up, W, locs_i, locs_j)
+            count_dn, sign_dn = find_diff_fast2(basis_dn, i, j, basis_tmp2, locs_dn, W, locs_i, locs_j)
+            #continue
+            #println("compare $ii $jj  $([count_up, count_dn]):  ", [count_up - count_up2, count_dn - count_dn2, sign_up - sign_up2, sign_dn - sign_dn2])
+            #
+            #if sign_up != sign_up2
+            #    println("up $sign_up $sign_up2")
+            #    println(basis_up[i,:])
+            #    println(basis_up[j,:])
+            #    println()
+            #end
+#            count_up = 0
+#            count_dn = 0
+            
             #            println()
 
             #find_diff
@@ -863,6 +1102,7 @@ function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_d
             #            count_dn, locs_dn = find_diff(basis_dn[i,:], basis_dn[j,:])
 
             #            push!(ArrH_threads[id], h)#*sign)
+            sign = 1.0
             if true
                 #            push!(ArrH_threads[id], h)#*sign)
 
@@ -891,48 +1131,41 @@ function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_d
                 #            println(locs_tmp_dn)
                 #count_dn, locs_dn = find_diff(basis_dn[i,:], basis_dn[j,:])
                 
-                
+                htemp = 0.0
                 sign = 1.0
                 #            println("i $i j $j count $([count_up, count_dn]) $(basis_up[i,:])$(basis_dn[i,:]) ,   $(basis_up[j,:])$(basis_dn[j,:]) lup $locs_up ldn $locs_dn")
                 #            continue
                 if count_up == 0 && count_dn == 0
-                    #BBB
+                    
                     htemp = matrix_el_0_precalc(dat, s_up, s_dn, (@view basis_up[i,:]), (@view basis_dn[i,:]), basis_dict, VH, RR, H_2bdy, Z0)
                     
                 elseif count_up == 2 && count_dn == 0
-                    #BBB
-                    htemp = matrix_el_1_samespin_precalc(dat, s_up, (@view basis_up[i,:]), s_dn, (@view basis_dn[i,:]), locs_up, basis_dict, VH, RR, H_2bdy, Z0=Z0)
-                    sign = (-1.0)^sum((@view basis_up[i,:])[minimum(@view locs_up[1:2])+1:maximum(@view locs_up[1:2])-1])
 
+                    htemp = matrix_el_1_samespin_precalc(dat, s_up, (@view basis_up[i,:]), s_dn, (@view basis_dn[i,:]), locs_up, basis_dict, VH, RR, H_2bdy, Z0=Z0)
+                    sign = sign_up
                     
                     
                 elseif count_up == 0 && count_dn == 2
-                    #BBB
                     htemp = matrix_el_1_samespin_precalc(dat, s_dn, (@view basis_dn[i,:]), s_up, (@view basis_up[i,:]), locs_dn, basis_dict, VH, RR, H_2bdy, Z0=Z0)
-                    sign = (-1.0)^sum((@view basis_dn[i,:])[minimum(@view locs_dn[1:2])+1:maximum( @view locs_dn[1:2])-1])
-                elseif count_up == 2 && count_dn == 2
+                    sign = sign_dn
                     
-                    #AAA
+                elseif count_up == 2 && count_dn == 2
                     htemp = matrix_el_2_diffspin_precalc(dat, s_up, s_dn, locs_up, locs_dn, basis_dict, VH, RR)
-                    sign =      (-1.0)^sum( (@view basis_up[i,:])[minimum(@view locs_up[1:2])+1:maximum(@view locs_up[1:2])-1])
-                    sign = sign*(-1.0)^sum( (@view basis_dn[j,:])[minimum(@view locs_dn[1:2])+1:maximum(@view locs_dn[1:2])-1])
-
-                    #if (i == 2 || i == 6 ) && j == 25
-                    #    println("IJ $i $j $h $sign")
-                    #end
+                    sign = sign_up * sign_dn
 
                 elseif count_up == 4 && count_dn == 0
                     htemp = matrix_el_2_samespin_precalc(dat, s_up, locs_up, basis_dict, VH, RR)
-
+                    sign = sign_up
                 elseif count_up == 0 && count_dn == 4
                     htemp = matrix_el_2_samespin_precalc(dat, s_dn, locs_dn, basis_dict, VH, RR)
-                    
+                    sign = sign_dn
                     
                 end
                 #h = i + j
 
                 #if false
             end
+            #println(["h ", i, basis_up[i,:], basis_up[j,:], j, basis_dn[i,:], basis_dn[j,:], count_up, count_dn], "   sign $sign  ", locs_up, locs_dn)
 
             if abs(htemp) > 1e-10
                 #                if (i == 2 || i == 6 ) && j == 25
@@ -945,7 +1178,7 @@ function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_d
 
                 push!(ArrI_threads[id], ii)
                 push!(ArrJ_threads[id], jj)
-                push!(ArrH_threads[id], htemp)#*sign)
+                push!(ArrH_threads[id], htemp * sign )#* sign)#*sign)
                 #                if !( h ≈ Float64(i+j))
                 #                    println("h $h $(i+j)")
                 #                end
@@ -978,8 +1211,9 @@ function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_d
     #    for (h,i,j) in zip(ArrH, ArrI, ArrJ)
     #        println("test $h    $i $j")
     #    end
-    
-    H = sparse(ArrI, ArrJ, ArrH)
+
+    println("sparse")
+    @time H = sparse(ArrI, ArrJ, ArrH)
     #    println(["IJ ",H[2,25], H[6,25]])
     #    println(["IJ ",H[25,2], H[25,6]])
     H = 0.5*(H + H')
@@ -1023,29 +1257,123 @@ function find_diff_fast(basis, i,j, basis_tmp, locs_tmp,W)
         count += basis_tmp[c]
     end
     #count = sum(abs.(v1 - v2))
+    sign = 1.0
     if count >= 5
-        return count
+        return count, 0.0
     else
         locs_tmp .= 0
         ind = 0
+
+
+        locs_i = []
+        locs_j = []
+        
         for c = 1:W
             if basis_tmp[c] == 1
                 ind += 1
                 locs_tmp[ind] = c
             end
+            if basis[i,c] == 1 && basis[j,c] == 0
+                push!(locs_i, c)
+            elseif basis[i,c] == 0 && basis[j,c] == 1
+                push!(locs_j, c)
+            end
+                
         end
-        
-        #        count = 0
-        #        locs = Int64[]
-        #        for i = 1:N
-        #            if v1[i] != v2[i]
-        #                count += 1
-        #                push!(locs, i)
-        #            end
-        #        end
-        
-        return count
+        if count == 2
+            sign =  (-1.0)^sum( basis[j,min(locs_i[1], locs_j[1])+1:max(locs_j[1], locs_i[1])-1])
+
+        elseif count == 4
+            basis_t = basis[j,:]
+
+            basis_t[locs_i[1]] = 1
+            basis_t[locs_j[1]] = 0
+            sign =      (-1.0)^sum( basis[j,min(locs_i[1], locs_j[1])+1:max(locs_j[1], locs_i[1])-1])
+            sign =  sign*(-1.0)^sum( basis_t[min(locs_i[2], locs_j[2])+1:max(locs_j[2], locs_i[2])-1])
+
+            basis_t[locs_i[2]] = 1
+            basis_t[locs_j[2]] = 0
+        end
     end
+    return count, sign
+
+    
+end
+
+function find_diff_fast2(basis, i,j, basis_tmp, locs_tmp,W, locs_i, locs_j)
+    
+    count = 0
+    for c = 1:W
+        basis_tmp[c] = abs(basis[i,c] - basis[j,c])
+        count += basis_tmp[c]
+    end
+    #count = sum(abs.(v1 - v2))
+    sign = 1.0
+    if count >= 5
+        return count, 0.0
+    else
+        #locs_tmp .= 0
+        ind = 0
+
+
+#        locs_i = []
+#        locs_j = []
+
+#        println("basis")
+#        println(basis[i,:])
+#        println(basis[j,:])
+#        println("size locs_tmp $(size(locs_tmp))")
+
+        
+
+        c_i = 0
+        c_j = 0
+        
+        for c = 1:W
+            if basis_tmp[c] == 1
+                ind += 1
+                locs_tmp[ind] = c
+            end
+            if basis[i,c] == 1 && basis[j,c] == 0
+                c_i += 1
+                locs_i[c_i] = c
+            elseif basis[i,c] == 0 && basis[j,c] == 1
+                c_j += 1
+                locs_j[c_j] = c
+            end
+        end
+        if count == 2
+            #sign =  (-1.0)^sum( basis[j,min(locs_i[1], locs_j[1])+1:max(locs_j[1], locs_i[1])-1])
+            c = 0
+            for ii = min(locs_i[1], locs_j[1])+1:max(locs_j[1], locs_i[1])-1
+                c += basis[j,ii]
+            end
+            sign = (-1.0)^c
+            
+        elseif count == 4
+            basis_t = basis[j,:]
+
+            basis_t[locs_i[1]] = 1
+            basis_t[locs_j[1]] = 0
+            c=0
+            for ii = min(locs_i[1], locs_j[1])+1:max(locs_j[1], locs_i[1])-1
+                c += basis[j,ii]
+            end
+            sign = (-1.0)^c
+            c=0
+            for ii = min(locs_i[2], locs_j[2])+1:max(locs_j[2], locs_i[2])-1
+                c += basis[j,ii]
+            end
+            sign = sign*(-1.0)^c
+            
+            #sign =      (-1.0)^sum( basis[j,min(locs_i[1], locs_j[1])+1:max(locs_j[1], locs_i[1])-1])
+            #sign =  sign*(-1.0)^sum( basis_t[min(locs_i[2], locs_j[2])+1:max(locs_j[2], locs_i[2])-1])
+
+            #basis_t[locs_i[2]] = 1
+            #basis_t[locs_j[2]] = 0
+        end
+    end
+    return count, sign
 
     
 end
@@ -1402,7 +1730,7 @@ end
 
 function  matrix_el_2_samespin_precalc(dat, s, locs, basis_dict, VH, RR )
 
-    println("locs $locs")
+#    println("locs $locs")
 
     h = 2.0*( matrix_coulomb_small_precalc(dat, ( s[locs[1],:]), ( s[locs[2],:]), ( s[locs[3],:]),(  s[locs[4],:]), basis_dict, VH, RR ))
     h += - 2.0*( matrix_coulomb_small_precalc(dat, ( s[locs[1],:]), ( s[locs[3],:]), ( s[locs[2],:]),(  s[locs[4],:]), basis_dict, VH, RR ))
@@ -1417,6 +1745,359 @@ end
 #    return h
 #    
 #end
+
+
+function get_denmat(vects, H, basis_up, basis_dn, s_up, s_dn, dat; thr=1e-12)
+
+    println("get_denmat $(size(vects))")
+
+    lmax = dat.lmax
+    M = dat.M
+    nspin = dat.nspin
+    N = dat.N
+#    mat_m2n = dat.mat_m2n
+#    mat_n2m = dat.mat_n2m
+
+    nmax_up = size(s_up, 1)
+    nmax_dn = size(s_dn, 1)
+
+    nmax = max(nmax_up, nmax_dn)
+    
+    v_NN = zeros(N-1, N-1, nspin, nmax)
+
+    bw = max(size(basis_up)[2], size(basis_dn)[2])
+#    println("bw $bw")
+    s_updn = [s_up, s_dn]
+
+    denmat = zeros(N-1,N-1,nspin,lmax+1,lmax*2+1)
+
+    N_basis = size(basis_up)[1]
+    W_basis = size(basis_up)[2]
+
+    println("N_basis $N_basis W_basis $W_basis")
+    
+    basis_tmp = zeros(Int64, W_basis)
+    locs_i = zeros(Int64, 2)
+    locs_j = zeros(Int64, 2)
+
+    locs_up = zeros(Int64,4)
+    locs_dn = zeros(Int64,4)
+    
+    for i = 1:N_basis
+        for j = 1:N_basis
+            
+            weight = real(vects[i,1]*conj(vects[j,1]))
+
+            b_up1 = basis_up[i,:]
+            b_dn1 = basis_dn[i,:]
+
+            b_up2 = basis_up[j,:]
+            b_dn2 = basis_dn[j,:]
+
+            
+            count_up, sign_up = find_diff_fast2(basis_up, i, j, basis_tmp, locs_up, W_basis, locs_i, locs_j)
+            count_dn, sign_dn = find_diff_fast2(basis_dn, i, j, basis_tmp, locs_dn, W_basis, locs_i, locs_j)
+
+            bb1 = (b_up1, b_dn1)
+            bb2 = (b_up2, b_dn2)
+
+            if count_up == 0 && count_dn == 0
+
+                for spin in [1,2]
+#                    println("add onsite spin $spin     $i $j  $b1 $b2")
+
+                    s = s_updn[spin]
+
+                    b = bb1[spin]
+                    for ind = 1:length(bb1[spin])
+                        if b[ind] == 1
+
+                            n1,l1,m1,spin_t1 = s[ind,:]
+                            n2,l2,m2,spin_t2 = s[ind,:]
+
+#                            println("add spin $spin ij $i $j  n1n2 $n1 $n2    spins $spin_t1 $spin_t2  $weight $(sum(0.5*weight*dat.VECTS_small[:,n1,spin_t1, l1+1, l1+m1+1]*dat.VECTS_small[:,n2,spin_t2, l2+1, l2+m2+1]'))")
+                            
+                            denmat[:,:,spin,l1+1,l1+m1+1] += 0.5*weight*dat.VECTS_small[:,n1,spin_t1, l1+1, l1+m1+1]*dat.VECTS_small[:,n2,spin_t2, l2+1, l2+m2+1]'
+                            denmat[:,:,spin,l1+1,l1+m1+1] += 0.5*weight*dat.VECTS_small[:,n2,spin_t2, l2+1, l2+m2+1]*dat.VECTS_small[:,n1,spin_t1, l1+1, l1+m1+1]'
+                        end
+#                        if b[ind] == 1##
+
+#                            n1,l1,m1,spin_t1 = s[ind,:]
+#                            n2,l2,m2,spin_t2 = s[ind,:]
+
+#                            println("add spin $spin ij $i $j  n1n2 $n1 $n2    spins $spin_t1 $spin_t2")
+                            
+#                            denmat[:,:,spin,l1+1,l1+m1+1] += 0.5*weight*dat.VECTS_small[:,n1,spin_t1, l1+1, l1+m1+1]*dat.VECTS_small[:,n2,spin_t2, l2+1, l2+m2+1]'
+#                            denmat[:,:,spin,l1+1,l1+m1+1] += 0.5*weight*dat.VECTS_small[:,n2,spin_t2, l2+1, l2+m2+1]*dat.VECTS_small[:,n1,spin_t1, l1+1, l1+m1+1]'
+#                        end
+
+                    end
+                end
+            elseif count_up == 2 && count_dn == 0
+
+                s = s_updn[1]
+                b1 = bb1[1]
+                b2 = bb2[1]
+                n1,l1,m1,spin_t1 = s[locs_up[1],:]
+                n2,l2,m2,spin_t2 = s[locs_up[2],:]
+                
+#                println("add $i $j , $n1 $n2     $locs_up   $b1  $b2    sign $sign_up")
+                denmat[:,:,1,l1+1,l1+m1+1] += 0.5*sign_up*weight*dat.VECTS_small[:,n1,spin_t1, l1+1, l1+m1+1]*dat.VECTS_small[:,n2,spin_t2, l2+1, l2+m2+1]'
+                denmat[:,:,1,l1+1,l1+m1+1] += 0.5*sign_up*weight*dat.VECTS_small[:,n2,spin_t2, l2+1, l2+m2+1]*dat.VECTS_small[:,n1,spin_t1, l1+1, l1+m1+1]'
+                
+            elseif count_up == 0 && count_dn == 2
+
+                s = s_updn[2]
+                b1 = bb1[2]
+                b2 = bb2[2]
+                n1,l1,m1,spin_t1 = s[locs_dn[1],:]
+                n2,l2,m2,spin_t2 = s[locs_dn[2],:]
+
+#                println("add dn $i $j , $n1 $n2     $locs_up   $b1  $b2    sign $sign_up")
+                denmat[:,:,2,l1+1,l1+m1+1] += 0.5*sign_dn*weight*dat.VECTS_small[:,n1,spin_t1, l1+1, l1+m1+1]*dat.VECTS_small[:,n2,spin_t2, l2+1, l2+m2+1]'
+                denmat[:,:,2,l1+1,l1+m1+1] += 0.5*sign_dn*weight*dat.VECTS_small[:,n2,spin_t2, l2+1, l2+m2+1]*dat.VECTS_small[:,n1,spin_t1, l1+1, l1+m1+1]'
+                
+
+                
+                
+            end
+        end
+    end
+    
+    #count_up, sign_up = find_diff_fast(basis_up, i_ind, j, basis_tmp, locs_up, W)
+    #count_dn, sign_dn = find_diff_fast(basis_dn, i_ind, j, basis_tmp, locs_dn, W)
+
+    
+#=
+    for c1 in 1:size(basis_up)[1]
+        for c2 in 1:size(basis_up)[1]
+
+            b_up1 = basis_up[c1,:]
+            b_dn1 = basis_dn[c1,:]
+
+            b_up2 = basis_up[c2,:]
+            b_dn2 = basis_dn[c2,:]
+            
+            weight = real(vects[c1,1]*conj(vects[c2,1]))
+
+            #        println("weight $c $weight")
+            bb1 = (b_up1, b_dn1)
+            bb2 = (b_up2, b_dn2)
+
+            for spin in [1]
+                b1 = bb1[spin]
+                b2 = bb2[spin]
+                f = 1.0
+                for ind = 2:length(b1)
+                    f = f * (b1[ind] == b2[ind])
+                end
+                l1 = 0
+                m1 = 0
+
+                s = s_updn[spin]
+                n1,l1,m1,spin_t1 = s[ind,:]
+                n2,l2,m2,spin_t2 = s[ind,:]
+
+                denmat[:,:,spin,l1+1,l1+m1+1] += weight*dat.VECTS_small[:,n1,spin_t1, l1+1, l1+m1+1]*dat.VECTS_small[:,n2,spin_t2, l2+1, l2+m2+1]'
+            end
+        end
+    end
+=#    
+#            for spin = 1:nspin
+#                b1 = bb1[spin]
+#                b2 = bb2[spin]
+#                s = s_updn[spin]
+#                for ind1 = 1:length(b1)
+#                    for ind2 = 1:length(b2)
+#                       if b1[ind1] == 1
+#                            if b2[ind2] == 1
+#                                n1,l1,m1,spin_t1 = s[ind1,:]
+#                                n2,l2,m2,spin_t2 = s[ind2,:]
+#                                if spin_t1 != spin
+#                                    println("error $spin $spin_t1 $spin_t2")
+#                                end
+#                                if spin_t1 != spin_t2
+#                                    continue
+#                                end
+#                                if l1 != l2
+#                                    continue
+#                                end
+#                                if m1 != m2
+#                                    continue
+#                                end
+#                                if spin == 1
+#                                    #                                    denmat[:,:,spin,l1+1,l1+m1+1] += weight*dat.VECTS_small[:,n1,spin_t1, l1+1, l1+m1+1]*dat.VECTS_small[:,n2,spin_t2, l2+1, l2+m2+1]'
+#                                    if c1 == c2
+#                                        println("add c $c1 $c2  ind $ind1 $ind2  n  $n1 $n2  l $l1 $l2 m  $m1 $m2  s $spin_t1 $spin_t2    $weight")
+#                                        denmat[:,:,spin,l1+1,l1+m1+1] += weight*dat.VECTS_small[:,n1,spin_t1, l1+1, l1+m1+1]*dat.VECTS_small[:,n2,spin_t2, l2+1, l2+m2+1]'
+#                                    end
+#                                end
+#                                    
+#                            end
+#                        end
+#                    end
+#                    println("add denmat $c $spin")
+#                end
+#            end
+#        end
+#    end
+
+    
+#=
+    for spin = 1:nspin
+        s = s_updn[spin]
+        for ss in 1:min(size(s,1), bw)
+            n, l, m, spin_t = s[ss,:]
+            v_NN[:,:,spin,ss] = dat.VECTS_small[:,n,spin_t, l+1, l+m+1]*dat.VECTS_small[:,n,spin_t, l+1, l+m+1]'
+#            println("add v_NN $n ")
+        end
+    end
+
+    denmat = zeros(N-1,N-1,nspin,lmax+1,lmax*2+1)
+    for c in 1:size(basis_up)[1]
+
+        b_up = basis_up[c,:]
+        b_dn = basis_dn[c,:]
+
+        weight = real(vects[c,1]*conj(vects[c,1]))
+
+#        println("weight $c $weight")
+        bb = (b_up, b_dn)
+        for spin = 1:nspin
+            b = bb[spin]
+            s = s_updn[spin]
+            for ind = 1:length(b)
+                if b[ind] == 1
+                    n,l,m,spin_t = s[ind,:]
+                    denmat[:,:,spin,l+1,l+m+1] += weight*v_NN[:,:,spin,ind]
+#                    println("add denmat $c $spin")
+                end
+            end
+        end
+    end
+=#
+#    sqrtS
+    
+    return denmat
+
+
+end
+    
+
+function truncate_denmat(denmat, dat, nmax; thr=1e-8)
+
+    lmax = dat.lmax
+    M = dat.M
+    nspin = dat.nspin
+    N = dat.N
+
+    sqrtS_inv = inv(dat.sqrtS)
+#    VECTS_small = deepcopy(dat.VECTS_small)
+
+    keep_dict = Dict()
+    nkeep_max = 0
+    VECTS_new = zeros(N-1, N-1, nspin, lmax+1, 2*lmax+1)
+    
+    #    for spin = 1:nspin
+    for spin = 1:1
+        for l = 0:lmax
+            for m = -l:l
+                #                valsX, vectsX = eigen(Hermitian(dat.sqrtS * denmat[:,:,spin,l+1,l+m+1] * dat.sqrtS))
+                #                valsX, vectsX = eigen(Hermitian( denmat[:,:,spin,l+1,l+m+1]) , dat.S)
+                #valsX, vectsX = eigen(Hermitian( denmat[:,:,spin,l+1,l+m+1]) , Hermitian(inv(dat.S)))
+
+                valsX, vectsX = eigen(Hermitian( denmat[:,:,spin,l+1,l+m+1]))
+
+                #for ii = 1:10
+                #    println("valsX start $ii ", valsX[ii])
+                #end
+                #println()
+                #for ii = 10:-1:1
+                #    println("valsX end   $ii ", valsX[end-ii+1])
+                #end
+                #println()
+#                vects = sqrtS_inv * vectsX
+#                valsX, vects = eigen(denmat[:,:,spin,l+1,l+m+1])
+#                println()
+#                a = sum(abs.(vectsX[:,N-1:-1:1] - dat.VECTS_small[:,:,spin,l+1,l+m+1]), dims=1)
+#                b = sum(abs.(vectsX[:,N-1:-1:1] + dat.VECTS_small[:,:,spin,l+1,l+m+1]), dims=1)
+                #for ii = 1:30
+                #    println("v $ii $(min(a[ii],b[ii]))")
+                #end
+                #                println("VECTS TEST ", sum(abs.(vects[:,N-1:-1:1] - dat.VECTS_small[:,:,spin,l+1,l+m+1]), dims=1))
+#                println()
+#                println("VECTS TEST2 ", sum(abs.(vects[:,N-1:-1:1] + dat.VECTS_small[:,:,spin,l+1,l+m+1]), dims=1))
+#                println()
+
+                keep = Int64[]
+                c=0
+                for n = (N-1):-1:(N-1 - nmax[l+1])
+#                    println("spin $spin n $n  lm $l $m occ: $(valsX[n])")
+                    if valsX[n] > thr
+                        c+= 1
+                        #VECTS_new[:,c,spin, l+1, l+m+1] = vects[:,n]   * sqrt(valsX[n])
+                        VECTS_new[:,c,spin, l+1, l+m+1] = vectsX[:,n]
+                        push!(keep, n)                        
+                    else
+                        #extra = n:(N-1)
+                        #extra = (nmax[l+1]+1):(N-1)
+#                        println("done c $c l $l m $m nmax[l+1] $(nmax[l+1]) N $N length(extra) $(length(extra))  $((c+1):(c+1+length(extra))) extra $(nmax[l+1]+1) $(N-1) ")
+                        #                        println("update vects_new $(c+1) $(c+length(extra))")
+                        #VECTS_new[:,(c+1):(c+length(extra)),spin,l+1,l+m+1] = dat.VECTS_small[:,extra,spin,l+1,l+m+1] 
+                        break
+                    end
+                end
+                keep_dict[(spin, l, m)] = keep
+#                println("KEEP spin $spin n $c  lm $l $m : $(length(keep))")
+                nkeep_max= max(length(keep), nkeep_max)
+            end
+        end
+    end
+
+    
+    return VECTS_new, keep_dict
+    
+    
+    
+end
+
+
+
+function run_CI(dat, nexcite; energy_max = 1000000000000.0, nmax = 1000000, dense=false, symmetry=false, Z0=1.0, thr = 1e-12)
+
+    if typeof(nmax) == Int64
+        nmax = nmax * ones(Int64, dat.lmax+1)
+        for n in 1:dat.lmax
+            nmax[n+1] = nmax[n+1] - 1
+        end
+    end
+
+    ham =  construct_ham(dat, nexcite; energy_max = energy_max, nmax = nmax, dense=dense, symmetry=symmetry, Z0=Z0)
+    if isnothing(ham)
+        return nothing
+    end
+    ArrI, ArrJ, ArrH, H, basis_up, basis_dn, s_up, s_dn = ham
+    if size(H)[1] < 100
+        vals, vects = eigen(collect(H));
+    else
+        vals, vects = eigs(H, which=:SR);
+    end
+    println("ENERGY $(vals[1]) ECORR $(vals[1] - dat.etot)")
+
+    println("get_denmat")
+    @time denmat = get_denmat(vects, H, basis_up, basis_dn, s_up, s_dn, dat, thr=thr)
+    println("end get_denmat")
+
+    
+    println("truncate_denmat")
+    @time VECTS_new, keep_dict = truncate_denmat(denmat, dat, nmax, thr=thr)
+    println("end truncate_denmat")
+    
+    return ArrI, ArrJ, ArrH, H, vals, vects, basis_up, basis_dn, s_up, s_dn, denmat, VECTS_new, keep_dict
+    
+end
+    
+
 
 
 

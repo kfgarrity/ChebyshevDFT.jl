@@ -161,7 +161,7 @@ function EXC(n, funlist, drho, ddrho, dvsigma, theta, gga, r, D1)
 
     #    drho_s  = drho 
     #sigma_s = drho[:,1].^2 + drho[:,2].^2 + drho[:,3].^2
-    println(n[1:2], "sigma ", sigma[1:2])
+    #println(n[1:2], "sigma ", sigma[1:2])
     
     for fun in funlist
         if gga

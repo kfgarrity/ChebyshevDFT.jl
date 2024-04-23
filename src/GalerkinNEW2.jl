@@ -38,7 +38,7 @@ Base.show(io::IO, g::gal) = begin
     println(io, "N=$(g.N) M=$(g.M) a=$(g.a) b=$(g.b) α=$(g.α)")
 end
 
-function makegal(N,a,b; α=0.0, M = -1)
+function makegal(N,a,b; α=0.0, M = -1, orthogonalize=false)
 
     a = Float64(a)
     b = Float64(b)
@@ -72,7 +72,13 @@ function makegal(N,a,b; α=0.0, M = -1)
     #println("s check ", sum(abs.(s-s_fast)))
     #    println(size(bvals))
 
-
+    if orthogonalize == true
+        sqrtS = sqrt(s)
+        sqrtSinv = inv(sqrtS)
+        d1= sqrtSinv*d1*sqrtSinv
+        d2= sqrtSinv*d2*sqrtSinv
+        s = 1.0*collect(I(size(s)[1]))
+    end
     
     return gal(N,M,a,b,α,bvals,dbvals,ddbvals,pts,w,s,inv(s),d1,d2,r,invr,dr,R,X,B,dB)
 

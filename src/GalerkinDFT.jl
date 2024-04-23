@@ -88,6 +88,7 @@ struct scf_data
     D2::Array{Float64,2}
     S::Array{Float64}
     S5::Array{Float64,2}
+    sqrtS::Array{Float64,2}
     V_C::Array{Float64,2}
     V_L::Array{Float64,2}
     mat_n2m::Array{Float64,2}
@@ -199,7 +200,54 @@ end
 #end
 
 
-function make_scf_data(    g::gal,    N::Int64,    M::Int64,    rmax::Float64,  α::Float64,  Z::Float64,    nspin::Int64,    lmax::Int64,    lmaxrho::Int64,    mix_lm::Bool,    niters::Int64,    mix::Float64,    mixing_mode::Symbol,    conv_thr::Float64,    fill_str::String,    nel::Array{Float64,3},    exc,    funlist,    gga::Bool,    LEB::leb,    exx::Float64,    filling::Array{Float64,4},    VALS::Array{Float64,4},    VECTS_small::Array{Float64,5},    VECTS_big::Array{Float64,3}    ,    rho_R2::Array{Float64,4},    big_code,    R::Array{Float64},    D1::Array{Float64,2},    D2::Array{Float64,2},    S::Array{Float64}, S5::Array{Float64,2},   V_C::Array{Float64,2},V_L::Array{Float64,2},    mat_n2m::Array{Float64,2},    mat_m2n::Array{Float64,2},    dict_lm,lm_dict,     etot::Float64,    e_vxc::Float64,    e_hart::Float64,    e_exx::Float64,    e_ke::Float64,    e_nuc::Float64, hf_sym, hf_sym_big, orthogonalize::Bool)
+function make_scf_data(    g::gal,
+                           N::Int64,
+                           M::Int64,
+                           rmax::Float64,
+                           α::Float64,
+                           Z::Float64,
+                           nspin::Int64,
+                           lmax::Int64,
+                           lmaxrho::Int64,
+                           mix_lm::Bool,
+                           niters::Int64,
+                           mix::Float64,
+                           mixing_mode::Symbol,
+                           conv_thr::Float64,
+                           fill_str::String,
+                           nel::Array{Float64,3 },
+                           exc,
+                           funlist,
+                           gga::Bool,
+                           LEB::leb,
+                           exx::Float64,
+                           filling::Array{Float64,4},
+                           VALS::Array{Float64,4 },
+                           VECTS_small::Array{Float64,5 },
+                           VECTS_big::Array{Float64,3 }    ,
+                           rho_R2::Array{Float64,4 },
+                           big_code,
+                           R::Array{Float64},
+                           D1::Array{Float64,2},
+                           D2::Array{Float64,2},
+                           S::Array{Float64,2},
+                           S5::Array{Float64,2},
+                           sqrtS::Array{Float64,2 },
+                           V_C::Array{Float64,2},
+                           V_L::Array{Float64,2 },
+                           mat_n2m::Array{Float64,2 },
+                           mat_m2n::Array{Float64,2 },
+                           dict_lm,
+                           lm_dict,
+                           etot::Float64,
+                           e_vxc::Float64,
+                           e_hart::Float64,
+                           e_exx::Float64,
+                           e_ke::Float64,
+                           e_nuc::Float64,
+                           hf_sym,
+                           hf_sym_big,
+                           orthogonalize::Bool)
 
 
     if orthogonalize
@@ -215,12 +263,61 @@ function make_scf_data(    g::gal,    N::Int64,    M::Int64,    rmax::Float64,  
         SVECTS_small = VECTS_small
     end
 
-    return scf_data(    g,    N,    M,    rmax,  α,  Z,    nspin,    lmax,    lmaxrho,    mix_lm,    niters,    mix,    mixing_mode,    conv_thr,    fill_str,    nel,    exc,    funlist,    gga,    LEB,    exx,    filling,    VALS,    VECTS_small,    VECTS_big    ,    rho_R2,    big_code,    R,    D1,    D2,    S,  S5,  V_C, V_L,   mat_n2m,    mat_m2n,    dict_lm,lm_dict, etot, e_vxc, e_hart, e_exx, e_ke, e_nuc, hf_sym, hf_sym_big, orthogonalize, SVECTS_small)
+    return scf_data(    g,
+                        N,
+                        M,
+                        rmax,
+                        α,
+                        Z,
+                        nspin,
+                        lmax,
+                        lmaxrho,
+                        mix_lm,
+                        niters,
+                        mix,
+                        mixing_mode,
+                        conv_thr,
+                        fill_str,
+                        nel,
+                        exc,
+                        funlist,
+                        gga,
+                        LEB,
+                        exx,
+                        filling,
+                        VALS,
+                        VECTS_small,
+                        VECTS_big    ,
+                        rho_R2,
+                        big_code,
+                        R,
+                        D1,
+                        D2,
+                        S,
+                        S5,
+                        sqrtS,
+                        V_C,
+                        V_L,
+                        mat_n2m,
+                        mat_m2n,
+                        dict_lm,
+                        lm_dict,
+                        etot,
+                        e_vxc,
+                        e_hart,
+                        e_exx,
+                        e_ke,
+                        e_nuc,
+                        hf_sym,
+                        hf_sym_big,
+                        orthogonalize,
+                        SVECTS_small)
 
 
 end
     
-function calc_energy(rho_rs_M_LM, EXC_LM, funlist, g, N, M, R, Vin, filling, vals, VH, Z, VX_LM, lmax, VECTS, exx, mix_lm, nspin, big_code, lm_dict)
+function calc_energy(rho_rs_M_LM,
+                     EXC_LM, funlist, g, N, M, R, Vin, filling, vals, VH, Z, VX_LM, lmax, VECTS, exx, mix_lm, nspin, big_code, lm_dict)
 
     e_vxc = 0.0
     if funlist != :hydrogen && funlist != :none
@@ -297,7 +394,7 @@ end
 
 function calc_energy_vh(rho_rs_M_LM, VH , g, N, M, R)
 
-    println("hartree s ", 2.0*0.5*4*pi* sum((sum( sum(rho_rs_M_LM, dims=2)[:,1,1,1] .* VH[:,1,1], dims=[2,3]) .* g.w[2:M+2,M] .* R.^2  ))  /sqrt(4*pi)/2 * (g.b - g.a)/2.0)
+#    println("hartree s ", 2.0*0.5*4*pi* sum((sum( sum(rho_rs_M_LM, dims=2)[:,1,1,1] .* VH[:,1,1], dims=[2,3]) .* g.w[2:M+2,M] .* R.^2  ))  /sqrt(4*pi)/2 * (g.b - g.a)/2.0)
 
 #    println("hartree p ", 2.0*0.5*4*pi* sum((sum( sum(rho_rs_M_LM, dims=2)[:,1,2,:] .* VH[:,2,:], dims=[2,3]) .* g.w[2:M+2,M] .* R.^2  ))  /sqrt(4*pi)/2 * (g.b - g.a)/2.0)
 #    println("hartree d ", 2.0*0.5*4*pi* sum((sum( sum(rho_rs_M_LM, dims=2)[:,1,3,:] .* VH[:,3,:], dims=[2,3]) .* g.w[2:M+2,M] .* R.^2  ))  /sqrt(4*pi)/2 * (g.b - g.a)/2.0)        
@@ -404,6 +501,11 @@ function choose_exc(exc, nspin)
 
         end
 
+        if exc == :HF || exc == :hf || exc == "HF" || exc == "hf"
+            exc = :hone
+        end
+
+        
         if (typeof(exc) == String && lowercase(exc) == "none") || (typeof(exc) == Symbol && exc == :none) 
             funlist = :none
             println("Exc is none")
@@ -554,8 +656,18 @@ function mix_vects_big(VECTS, VECTS_new, mix, filling, Sbig, nspin, lmax, N, big
     
 end
 
-function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm, orthogonalize)
+function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm, orthogonalize, soft_coulomb, exx)
 
+    if exc == :hydrogen
+        exx = 0.0
+    end
+ 
+    if exc == :hf || exc == :HF || exc == "HF" || exc == "hf"
+        exx = 1.0
+        exc = :none
+    end
+ 
+    
     if typeof(Z) == String || typeof(Z) == Symbol
         Z = atoms[String(Z)]
     end
@@ -601,7 +713,7 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm, orthogonalize
 
     
     function V_c(r)
-        return -Z / r 
+        return -Z / sqrt(r^2  + soft_coulomb^2)
     end
 
     V_C = get_gal_rep_matrix(V_c, g, ; N = N, M = M)
@@ -824,9 +936,9 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm, orthogonalize
         Sbig = Hermitian(zeros(1,1))
     end
         
+    sqrtS = 1.0*collect(sqrt(S))
     
-    
-    return Z, nel, filling, nspin, lmax, V_C, V_L,D1, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga, LEB, R, gbvals2, nmax, hf_sym, hf_sym_big,mat_n2m, mat_m2n, R5, LINOP, lm_dict, dict_lm, big_code, Sbig, S5, Sold
+    return Z, nel, filling, nspin, lmax, V_C, V_L,D1, D2, S, invsqrtS, invS, VECTS, VALS, funlist, gga, LEB, R, gbvals2, nmax, hf_sym, hf_sym_big,mat_n2m, mat_m2n, R5, LINOP, lm_dict, dict_lm, big_code, Sbig, S5, Sold, sqrtS, exx
     
 end
 
@@ -3719,7 +3831,7 @@ function get_t2(VECTS, mat_n2m, mat_m2n, N, M, nspin, lmax)
 end
 
 
-function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters = 50, mix = 0.5, mixing_mode=:pulay, exc = missing, lmax = missing, conv_thr = 1e-7, lmaxrho = 0, mix_lm = false, exx = 0.0, VECTS=missing, orthogonalize=false)
+function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters = 50, mix = 0.5, mixing_mode=:pulay, exc = missing, lmax = missing, conv_thr = 1e-7, lmaxrho = 0, mix_lm = false, exx = 0.0, VECTS=missing, orthogonalize=false, soft_coulomb=0.0)
 
     if M > g.M
         M = g.M
@@ -3740,7 +3852,8 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     
     
     println("time prepare")
-    @time Z, nel, filling, nspin, lmax, V_C, V_L, D1, D2, S, invsqrtS, invS, VECTS_start, VALS, funlist, gga, LEB, R, gbvals2, nmax, hf_sym, hf_sym_big, mat_n2m, mat_m2n, R5, LINOP, lm_dict, dict_lm, big_code, Sbig, S5, Sold = prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm, orthogonalize)
+    @time Z, nel, filling, nspin, lmax, V_C, V_L, D1, D2, S, invsqrtS, invS, VECTS_start, VALS, funlist, gga, LEB, R, gbvals2, nmax, hf_sym, hf_sym_big, mat_n2m, mat_m2n, R5, LINOP, lm_dict, dict_lm, big_code, Sbig, S5, Sold, sqrtS, exx =
+        prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm, orthogonalize, soft_coulomb, exx)
 
     if false
         filling .= 0.0
@@ -3754,10 +3867,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     end
 
     
-    if exc == :hydrogen
-        exx = 0.0
-    end
-    
+   
     VECTS_big = zeros(Float64, length(lm_dict) * (N-1), length(lm_dict) * (N-1), nspin)
     VECTS_small = zeros(Float64, N-1,N-1, nspin, lmax+1,2*lmax+1 )
 
@@ -4031,7 +4141,109 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
 #    println("typeof S ", typeof(S))
 #   println("typeof S5 ", typeof(S5))
     S5 = Float64.(S5)
-    dat = make_scf_data(   g,    N,    M,    g.b, g.α,    Z,    nspin,    lmax,    lmaxrho,    mix_lm,    niters,    mix,    mixing_mode,    conv_thr,    fill_str,    nel,    exc,    funlist,    gga,    LEB,    exx,    filling,    VALS,    VECTS_small,    VECTS_big    ,    rho_R2,    big_code,    R,    D1,    D2,    S,  S5,  V_C,  V_L,  mat_n2m,    mat_m2n,    dict_lm,lm_dict, etot, e_vxc, e_hart, e_exx, e_ke, e_nuc, hf_sym, hf_sym_big, orthogonalize)
+    println("size sqrt S ", size(sqrtS))
+    println(typeof(sqrtS))
+
+    println("adfdfdfd")
+    for (counter, aaa) in enumerate([  g,
+                           N,
+                           M,
+                           g.b,
+                           g.α,
+                           Z,
+                           nspin,
+                           lmax,
+                           lmaxrho,
+                           mix_lm,
+                           niters,
+                           mix,
+                           mixing_mode,
+                           conv_thr,
+                           fill_str,
+                           nel,
+                           exc,
+                           funlist,
+                           gga,
+                           LEB,
+                           exx,
+                           filling,
+                           VALS,
+                           VECTS_small,
+                           VECTS_big    ,
+                           rho_R2,
+                           big_code,
+                           R,
+                           D1,
+                           D2,
+                           S,
+                           S5,
+                           sqrtS,
+                           V_C,
+                           V_L,
+                           mat_n2m,
+                           mat_m2n,
+                           dict_lm,
+                           lm_dict,
+                           etot,
+                           e_vxc,
+                           e_hart,
+                           e_exx,
+                           e_ke,
+                           e_nuc,
+                           hf_sym,
+                           hf_sym_big,
+                  orthogonalize])
+#        println(" a $counter  $(typeof(aaa))")
+    end
+
+    dat = make_scf_data(   g,
+                           N,
+                           M,
+                           g.b,
+                           g.α,
+                           Z,
+                           nspin,
+                           lmax,
+                           lmaxrho,
+                           mix_lm,
+                           niters,
+                           mix,
+                           mixing_mode,
+                           conv_thr,
+                           fill_str,
+                           nel,
+                           exc,
+                           funlist,
+                           gga,
+                           LEB,
+                           exx,
+                           filling,
+                           VALS,
+                           VECTS_small,
+                           VECTS_big    ,
+                           rho_R2,
+                           big_code,
+                           R,
+                           D1,
+                           D2,
+                           S,
+                           S5,
+                           sqrtS,
+                           V_C,
+                           V_L,
+                           mat_n2m,
+                           mat_m2n,
+                           dict_lm,
+                           lm_dict,
+                           etot,
+                           e_vxc,
+                           e_hart,
+                           e_exx,
+                           e_ke,
+                           e_nuc,
+                           hf_sym,
+                           hf_sym_big,
+                           orthogonalize)
     
     return dat
     
