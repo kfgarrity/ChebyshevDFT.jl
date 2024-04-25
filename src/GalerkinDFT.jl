@@ -775,7 +775,7 @@ function prepare(Z, fill_str, lmax, exc, N, M, g, lmaxrho, mix_lm, orthogonalize
     big_code = Dict()
     counter = 1
     for ll = 0:lmax
-        vals, vects = eigen(D2 + V_C + ll*(ll+1)*V_L, S)
+        vals, vects = eigen(Hermitian(D2 + V_C + ll*(ll+1)*V_L),Hermitian( S))
 
         h = D2 + V_C + ll*(ll+1)*V_L
         #println("ham ", sum(abs.(h - h')), " ", sum(abs.(S - S')))
