@@ -1395,8 +1395,8 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
     #    println("d ", rho_gal_R2[1]," ", rho_gal_mulipole_LM[1])
 
     
-    println("ChebyshevDFT.Galerkin.do_1d_integral(rho_gal, g)    ", do_1d_integral(rho_gal_R2_LM[:,1,1,1], g))
-    println("ChebyshevDFT.Galerkin.do_1d_integral(rho_gal, g) dR ", do_1d_integral(rho_gal_dR_LM[:,1,1,1], g))
+#    println("ChebyshevDFT.Galerkin.do_1d_integral(rho_gal, g)    ", do_1d_integral(rho_gal_R2_LM[:,1,1,1], g))
+#    println("ChebyshevDFT.Galerkin.do_1d_integral(rho_gal, g) dR ", do_1d_integral(rho_gal_dR_LM[:,1,1,1], g))
 
     MP = zeros(lmaxrho+1, 2*lmaxrho+1)
     
@@ -1409,9 +1409,9 @@ function get_rho(VALS, VECTS, nel, filling, nspin, lmax, lmaxrho, N, M, invS, g,
                     MP[l+1, l+m+1] += real(sum((rho_rs_M_R2_LM[:,spin,l+1,l+m+1]) .* g.w[2:M+2,M] .* R.^l) / (2*l+1))
                     #println("typeof " , typeof(rho_rs_M_R2_LM[1,spin,l+1,l+m+1]))
                 end
-                if abs(MP[l+1, l+m+1]) > 1e-5
-                    println("rho MP $l $m ", MP[l+1, l+m+1])
-                end
+#                if abs(MP[l+1, l+m+1]) > 1e-5
+#                    println("rho MP $l $m ", MP[l+1, l+m+1])
+#                end
             end
         end
 #    println()
@@ -2857,7 +2857,7 @@ function vhart_LM(rho_dR, D2, g, N, M, lmaxrho, lmax, MP, V_L, gbvals2, S, VECTS
 
     for l = 0:loopmax
         for m = -l:l
-            println("size ", size(VH_LM), " ", size(VTILDE), " " , size(rho_dR))
+#            println("size ", size(VH_LM), " ", size(VTILDE), " " , size(rho_dR))
             VH_LM[:, :, l+1, m+l+1], VTILDE[:,l+1,m+l+1] = vhart(rho_dR[:,1,l+1, m+l+1], D2, V_L, g, M, l, m, MP, gbvals2)
 #            println("VHART $l $m ", sum(abs.(VH_LM[:, :, l+1, m+l+1])),  "  " ,sum(abs.(rho_dR[:,1,l+1, m+l+1])))
             #, vh_mat2, vt, X
@@ -3008,7 +3008,7 @@ end
 
 function vhart(rhor2, D2, V_L, g, M, l, m, MP, gbvals2)
 
-    println("check rho 1D ", do_1d_integral(rhor2[:,1,1,1], g))
+#    println("check rho 1D ", do_1d_integral(rhor2[:,1,1,1], g))
     vh_tilde = (D2 + l*(l+1)*V_L) \ rhor2
     vh_tilde = vh_tilde /(4*pi)*sqrt(pi)
 
@@ -3019,7 +3019,7 @@ function vhart(rhor2, D2, V_L, g, M, l, m, MP, gbvals2)
 #    println("size vh_tilde ", size(vh_tilde))
     vh_mat, vt = get_vh_mat(vh_tilde, g, l, m, MP, gbvals2, M=M)
 
-    println("sum vt ", sum(vt[:,1,1,1]))
+#    println("sum vt ", sum(vt[:,1,1,1]))
 #    println("size1 ", size(inv(D2 + l*(l+1)*V_L)) )
 #    println("size2 ", size(rhor2))
 #    println("size3 ", size( diagm( 1.0 ./ g.R.(@view g.pts[2:M+2,M]) )))
@@ -3956,9 +3956,12 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
         Vin[:,2,1,1] = -Z ./ R * 4 *pi / sqrt(pi) 
     end
     
-    etot, e_vxc, e_hart, e_exx, e_ke, e_nuc = calc_energy(rho_rs_M, EXC_LM, funlist, g, N, M, R, Vin, filling, VALS, VTILDE, Z, VX_LM, lmax, VECTS, exx, mix_lm, nspin, big_code, lm_dict)
+#    etot, e_vxc, e_hart, e_exx, e_ke, e_nuc = calc_energy(rho_rs_M, EXC_LM, funlist, g, N, M, R, Vin, filling, VALS, VTILDE, Z, VX_LM, lmax, VECTS, exx, mix_lm, nspin, big_code, lm_dict)
 
     
+#    println("old energy")
+#    etot, e_vxc, e_hart, e_exx, e_ke, e_nuc = calc_energy(rho_rs_M, EXC_LM, funlist, g, N, M, R, Vin, filling, VALS, VTILDE, Z, VX_LM, lmax, VECTS, exx, mix_lm, nspin, big_code, lm_dict)
+
     for iter = 1:niters
 
         Vin .= 0.0
@@ -3966,6 +3969,10 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
         if nspin == 2
             Vin[:,2,1,1] = -Z ./ R * 4 *pi / sqrt(pi) 
         end
+
+#        println("after vin ", [sum(abs.(rho_rs_M)), sum(abs.(VECTS))])
+#        etot, e_vxc, e_hart, e_exx, e_ke, e_nuc = calc_energy(rho_rs_M, EXC_LM, funlist, g, N, M, R, Vin, filling, VALS, VTILDE, Z, VX_LM, lmax, VECTS, exx, mix_lm, nspin, big_code, lm_dict)
+
         
         VALS_1[:,:,:,:] = VALS
 
@@ -3978,9 +3985,9 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
             #MP[1] = MP_temp
             VH_LM_old = deepcopy(VH_LM)
             VH_LM, VTILDE = vhart_LM( sum(rho_dR, dims=2), D2, g, N, M, lmaxrho, lmax, MP*ex_factor, V_L,gbvals2, S, VECTS, loopmax) #ex_factor*
-            println("size VTILDE x ", size(VTILDE))
+#            println("size VTILDE x ", size(VTILDE))
 
-            println("vtilde ", sum( VTILDE[:,1,1,1]))
+#            println("vtilde ", sum( VTILDE[:,1,1,1]))
             Vin[:,1,:,:] += 4 * pi * VTILDE[:,1:loopmax+1, 1:loopmax*2+1] * 2.0 
             if nspin == 2
                 Vin[:,2,:,:] += 4 * pi * VTILDE[:,1:loopmax+1, 1:loopmax*2+1] * 2.0
@@ -3993,15 +4000,23 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
             VH_LM = zeros(N-1,N-1,lmaxrho+1, lmaxrho*2+1)
         end
 
+#        println("after vh ", [sum(abs.(rho_rs_M)), sum(abs.(VECTS))])
+        
+#        etot, e_vxc, e_hart, e_exx, e_ke, e_nuc = calc_energy(rho_rs_M, EXC_LM, funlist, g, N, M, R, Vin, filling, VALS, VTILDE, Z, VX_LM, lmax, VECTS, exx, mix_lm, nspin, big_code, lm_dict)
+
+        
         #println("vxc")
         if funlist != :none && funlist != :hydrogen
             VXC_LM, vxc_tp, exc_tp, VSIGMA_tp, EXC_LM, VXC_LM_M = vxc_LM( rho_rs_M, drho_rs_M_LM, g, M, N, funlist, gga, nspin, lmax, lmaxrho, LEB, R, invS, gbvals2, loopmax)
 
-            println("VXC_LM_M ", VXC_LM_M[1])
+            #println("VXC_LM_M ", VXC_LM_M[1])
             Vin += VXC_LM_M[:,:,1:loopmax+1, 1:loopmax*2+1] * 2.0
             
         end
 
+#        println("after vxc")
+#        etot, e_vxc, e_hart, e_exx, e_ke, e_nuc = calc_energy(rho_rs_M, EXC_LM, funlist, g, N, M, R, Vin, filling, VALS, VTILDE, Z, VX_LM, lmax, VECTS, exx, mix_lm, nspin, big_code, lm_dict)
+        
         #println("vxx")
         if exx > 1e-12
             #            println("calculating exact exchange")
@@ -4019,19 +4034,28 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
 
         end
 
+#        println("after vxx")
+#        etot, e_vxc, e_hart, e_exx, e_ke, e_nuc = calc_energy(rho_rs_M, EXC_LM, funlist, g, N, M, R, Vin, filling, VALS, VTILDE, Z, VX_LM, lmax, VECTS, exx, mix_lm, nspin, big_code, lm_dict)
 
+#        println("old energy before solve small")
+#        etot, e_vxc, e_hart, e_exx, e_ke, e_nuc = calc_energy(rho_rs_M, EXC_LM, funlist, g, N, M, R, Vin, filling, VALS, VTILDE, Z, VX_LM, lmax, VECTS, exx, mix_lm, nspin, big_code, lm_dict)
+        
 
 
         #        println("funlist $funlist")
         #println("solve")
         if mix_lm == false
             VALS, VECTS_new = solve_small(V_C, V_L, VH_LM  , VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, funlist, VECTS, VALS, exx) #+ VH_LM0*ex_factor
-
+            
         else
             #println("solve big time")            
             VALS_big, VECTS_new, big_code_new, Hh, Sh,symmetry_list = solve_big(V_C, V_L, VH_LM, VXC_LM, VX_LM, D2, S, nspin, lmax, lmaxrho, funlist, lm_dict, VECTS, VALS, exx, Sbig ,symmetry_list)
         end
 
+
+#        println("old energy after solve small")
+#        etot, e_vxc, e_hart, e_exx, e_ke, e_nuc = calc_energy(rho_rs_M, EXC_LM, funlist, g, N, M, R, Vin, filling, VALS, VTILDE, Z, VX_LM, lmax, VECTS, exx, mix_lm, nspin, big_code, lm_dict)
+        
 #        println("mix_lm ", mix_lm)
 #        println("rho1")
 #        @time if mix_lm == false
@@ -4091,6 +4115,8 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
         end
         println("iter $iter eigval_diff $eigval_diff ")
 
+#        println("new energy")
+#        etot, e_vxc, e_hart, e_exx, e_ke, e_nuc = calc_energy(rho_rs_M, EXC_LM, funlist, g, N, M, R, Vin, filling, VALS, VTILDE, Z, VX_LM, lmax, VECTS, exx, mix_lm, nspin, big_code, lm_dict)
         
         if maximum(abs.(filling.*(VALS - VALS_1))) < conv_thr
             break
@@ -4123,7 +4149,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     println()
     
     #    println("size rho_rs_M", size(rho_rs_M))
-    println("size(VECTS ", size(VECTS))
+#    println("size(VECTS ", size(VECTS))
     if mix_lm
 
         VECTS_big .= VECTS
