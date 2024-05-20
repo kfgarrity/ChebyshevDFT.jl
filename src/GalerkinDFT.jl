@@ -3843,7 +3843,7 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
     end
     
     if M == -1 
-        M = g.M
+        M = g.goodM
     end
     if N == -1
         N = g.N

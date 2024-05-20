@@ -30,12 +30,12 @@ struct gal
     X
     B
     dB
-
+    goodM::Int64
 end
 
 Base.show(io::IO, g::gal) = begin
     println(io, "Galerkin obj")
-    println(io, "N=$(g.N) M=$(g.M) a=$(g.a) b=$(g.b) α=$(g.α)")
+    println(io, "N=$(g.N) M=$(g.M) a=$(g.a) b=$(g.b) α=$(g.α) recommended_M=$(g.goodM)")
 end
 
 function makegal(N,a,b; α=0.0, M = -1, orthogonalize=false)
@@ -71,6 +71,10 @@ function makegal(N,a,b; α=0.0, M = -1, orthogonalize=false)
         println(s[1:3,1:3])
     end
 
+    g = gal(N,M,a,b,α,bvals,dbvals,ddbvals,pts,w,s,inv(s),d1,d2,r,invr,dr,R,X,B,dB, M)
+    goodM = test_m(g)
+    
+    
     #println("s_fast")
     #println(s_fast[1:3,1:3])
     
@@ -85,7 +89,8 @@ function makegal(N,a,b; α=0.0, M = -1, orthogonalize=false)
 #        s = 1.0*collect(I(size(s)[1]))
 #    end
     
-    return gal(N,M,a,b,α,bvals,dbvals,ddbvals,pts,w,s,inv(s),d1,d2,r,invr,dr,R,X,B,dB)
+    return gal(N,M,a,b,α,bvals,dbvals,ddbvals,pts,w,s,inv(s),d1,d2,r,invr,dr,R,X,B,dB, goodM)
+
 
 end
 
@@ -685,6 +690,40 @@ function get_sd(r, B, α)
     d1 = (d1 - d1')/2.0
 
     return S, d1, d2
+end
+
+function test_m(gal; tol=1e-10, verbose=false)
+
+    N = gal.N
+    c1 = N-1
+    c2 = N-1
+    good = gal.M
+    over = 0.0
+    good_list = [good]
+    firstgood = -100
+    for M = 10:gal.M
+        over = 0.0
+        @turbo for x = 2:M+2
+            over += gal.bvals[x,c1,M]*gal.bvals[x,c2,M]*gal.w[x,M]
+        end
+        if verbose
+            println("M $M over $over")
+        end
+        if abs(over - 1.0) < tol && firstgood == M-1
+            good = M
+            break
+        elseif abs(over - 1.0) < tol
+            firstgood = M
+        end
+        
+    end
+    println("recommended M value $good , tol  = $(abs(over - 1.0))")
+    if abs(over - 1) > tol
+        println("WARNING, did not reach desired tolerance, try higher M")
+    end
+        
+    return good
+    
 end
 
 function get_sd_fast(r, B, α, bvals, dbvals, ddbvals, N, M, w, a, b)
