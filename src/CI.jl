@@ -472,14 +472,24 @@ function matrix_coulomb_small_precalc(dat, nlms1, nlms2, nlms3, nlms4, basis_dic
     end
     #println("b")
 
-    if (i1,i2,i3,i4,l1,l2,l3,l4,m1,m2,m3,m4,s1,s2,s3,s4) in keys(cdict_threadsafe)
-        return cdict_threadsafe[i1,i2,i3,i4,l1,l2,l3,l4,m1,m2,m3,m4,s1,s2,s3,s4]
-    else
-        c = core(i1,i2,i3,i4,l1,l2,l3,l4,m1,m2,m3,m4, dat, VH, RR)
-        cdict_threadsafe[i1,i2,i3,i4,l1,l2,l3,l4,m1,m2,m3,m4,s1,s2,s3,s4] = c
-        return c
-    end
-#    return core(i1,i2,i3,i4,l1,l2,l3,l4,m1,m2,m3,m4, dat, VH, RR)
+#    if (i1,i2,i3,i4,l1,l2,l3,l4,m1,m2,m3,m4,s1,s2,s3,s4) in keys(cdict_threadsafe)
+#        return cdict_threadsafe[i1,i2,i3,i4,l1,l2,l3,l4,m1,m2,m3,m4,s1,s2,s3,s4]
+#    else
+#        c = core(i1,i2,i3,i4,l1,l2,l3,l4,m1,m2,m3,m4, dat, VH, RR)
+#        cdict_threadsafe[i1,i2,i3,i4,l1,l2,l3,l4,m1,m2,m3,m4,s1,s2,s3,s4] = c
+#        cdict_threadsafe[i2,i1,i3,i4,l2,l1,l3,l4,m2,m1,m3,m4,s2,s1,s3,s4] = c
+#        cdict_threadsafe[i1,i2,i4,i3,l1,l2,l4,l3,m1,m2,m4,m3,s1,s2,s4,s3] = c
+#        cdict_threadsafe[i2,i1,i4,i3,l2,l1,l4,l3,m2,m1,m4,m3,s2,s1,s4,s3] = c
+# 
+#        cdict_threadsafe[i3,i4,i1,i2,l3,l4,l1,l2,m3,m4,m1,m2,s3,s4,s1,s2] = c
+#        cdict_threadsafe[i3,i4,i2,i1,l3,l4,l2,l1,m3,m4,m2,m1,s3,s4,s2,s1] = c
+#        cdict_threadsafe[i4,i3,i1,i2,l4,l3,l1,l2,m4,m3,m1,m2,s4,s3,s1,s2] = c
+#        cdict_threadsafe[i4,i3,i2,i1,l4,l3,l2,l1,m4,m3,m2,m1,s4,s3,s2,s1] = c
+#       
+#        
+#        return c
+#    end
+    return core(i1,i2,i3,i4,l1,l2,l3,l4,m1,m2,m3,m4, dat, VH, RR)
 
 end
 
@@ -756,6 +766,8 @@ function gen_basis(dat,  energy_max, nmax)
 #                println("add $l $m $(nmax[l+1])")
                 #for n = 1:min(dat.N-1,nmax[l+1])
                 for n = 1:min(dat.N-1,n_good[1,l,m], n_good[2,l,m] )
+
+                    
                     
 #                    println("add basis spin $spin l $l m $m n $n")
                     #                    println("add ", [n, spin, l+1, l+m+1], " ", dat.VALS[n, spin, l+1, l+m+1], " " , ground_state[n,spin, l+1, l+m+1])
@@ -970,7 +982,28 @@ function gen_combos( nex, nval, ncond)
 end
 
 
-function construct_ham(dat, nexcite; energy_max = 1000000000000.0, nmax = 1000000, dense=false, symmetry=false, Z0=1.0)
+function find_special(special_orbital, s)
+    if ismissing(special_orbital)
+        return 1:size(s)[1]
+    end
+
+    special = Int64[]
+    for i = 1:size(s)[1]
+        n, l, m, spin = s[i,:]
+        if n == special_orbital[1] && l == special_orbital[2]
+            push!(special, i)
+        end
+    end
+
+    if special == 0
+        println("WARNING special orbital  not found")
+    end
+
+    return special
+    
+end
+
+function construct_ham(dat, nexcite; energy_max = 1000000000000.0, nmax = 1000000, dense=false, symmetry=false, Z0=1.0, special_orbital=missing)
 
     if dat.nspin == 1
         println("ERROR - need 2 spins")
@@ -989,12 +1022,18 @@ function construct_ham(dat, nexcite; energy_max = 1000000000000.0, nmax = 100000
     end
 
     #put qualfied states into a list
-    println("gen_basis")
+    println("gen_basis nmax $nmax")
     @time val_up, val_dn, cond_up, cond_dn, nup, ndn, qnums_gs = gen_basis(dat, energy_max, nmax)
 
     s_up = [val_up; cond_up]
     s_dn = [val_dn; cond_dn]
 
+    special_up = find_special(special_orbital, s_up)
+    special_dn = find_special(special_orbital, s_dn)
+    
+#    println("s_up size ", maximum(s_up,dims=1))
+#    println("s_dn size ", maximum(s_dn,dims=1))
+    
 #    println("size s_up $(size(s_up)) s_dn $(size(s_dn)) ")
     
     println("precalc")
@@ -1021,10 +1060,10 @@ function construct_ham(dat, nexcite; energy_max = 1000000000000.0, nmax = 100000
     ham_pre = missing 
     println("make_ham_precalc main")
     @time  begin #@suppress
-        ArrI, ArrJ, ArrH, H, good_list,count_up_MAT, count_dn_MAT  = make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_dict, VH, RR, H_2bdy, gamma_up, gamma_dn, dense=dense, symmetry=symmetry, Z0=Z0)
+        ArrI, ArrJ, ArrH,  good_list,count_up_MAT, count_dn_MAT  = make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_dict, VH, RR, H_2bdy, gamma_up, gamma_dn, dense=dense, symmetry=symmetry, Z0=Z0, special_up=special_up, special_dn = special_dn)
     end
     #return ham[end], ham_pre[end]
-    return ArrI, ArrJ, ArrH, H, basis_up, basis_dn, s_up, s_dn, good_list, gamma_up, gamma_dn,count_up_MAT, count_dn_MAT
+    return ArrI, ArrJ, ArrH,  basis_up, basis_dn, s_up, s_dn, good_list, gamma_up, gamma_dn,count_up_MAT, count_dn_MAT
 end
 
 function make_ham(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn; dense=false)
@@ -1111,7 +1150,7 @@ function make_ham(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn; dense=false)
 
 end
 
-function make_ham_main(locs_i_up_ID,locs_j_up_ID,locs_i_dn_ID,locs_j_dn_ID,locs_up_threads,locs_dn_threads,basis_tmp_threads,basis_tmp_threads2,good_list,W, W_dn, basis_up, basis_dn,dat,s_up, s_dn, basis_dict, VH,RR, H_2bdy,Z0,gamma_up, gamma_dn)
+function make_ham_main(locs_i_up_ID,locs_j_up_ID,locs_i_dn_ID,locs_j_dn_ID,locs_up_threads,locs_dn_threads,basis_tmp_threads,basis_tmp_threads2,good_list,W, W_dn, basis_up, basis_dn,dat,s_up, s_dn, basis_dict, VH,RR, H_2bdy,Z0,gamma_up, gamma_dn, special_up, special_dn)
 
     ArrI_threads = []
     ArrJ_threads = []
@@ -1128,6 +1167,34 @@ function make_ham_main(locs_i_up_ID,locs_j_up_ID,locs_i_dn_ID,locs_j_dn_ID,locs_
     count_up_MAT = zeros(UInt16, length(good_list), length(good_list))
     count_dn_MAT = zeros(UInt16, length(good_list), length(good_list))
 
+
+    if length(special_up) == 0
+        keep_list = 1:length(good_list)
+    else
+        keep_list = Int64[]
+        @time for ii = 1:length(good_list) #1:N         #@threads
+            i = good_list[ii]
+            keep = false
+            for s in special_up
+                if basis_up[i,s] == 1
+                    keep = true
+                    break
+                end
+            end
+            if keep == false
+                for s in special_dn
+                    if basis_dn[i,s] == 1
+                        keep = true
+                        break
+                    end
+                end
+            end
+            if keep
+                push!(keep_list, ii)
+            end
+        end
+    end
+    
 #    locs_i_up_MAT = zeros(Int64, length(good_list), length(good_list),2)
 #    locs_j_up_MAT = zeros(Int64, length(good_list), length(good_list),2)
 
@@ -1138,7 +1205,7 @@ function make_ham_main(locs_i_up_ID,locs_j_up_ID,locs_i_dn_ID,locs_j_dn_ID,locs_
 #    locs_dn_MAT = zeros(Int64, length(good_list), length(good_list),4)
 
     println("before")
-    @time for ii = 1:length(good_list) #1:N         #@threads
+    @time for ii = keep_list #1:N         #@threads
         i = good_list[ii]
         id = threadid()
 
@@ -1151,7 +1218,8 @@ function make_ham_main(locs_i_up_ID,locs_j_up_ID,locs_i_dn_ID,locs_j_dn_ID,locs_
         basis_tmp  = @view basis_tmp_threads[:,id]
         basis_tmp2 = @view basis_tmp_threads2[:,id]
 
-        for jj = 1:length(good_list) #1:N
+        #        for jj = 1:length(good_list) #1:N
+        for jj = keep_list
             j = good_list[jj]
 
             count_up = find_diff_fast2(basis_up, i, j, basis_tmp2, locs_up, W, locs_i_up, locs_j_up, count_only=true)
@@ -1176,7 +1244,7 @@ function make_ham_main(locs_i_up_ID,locs_j_up_ID,locs_i_dn_ID,locs_j_dn_ID,locs_
 #    locs_j = zeros(Int64, 2)
 
 
-    @time @threads for ii = 1:length(good_list) #1:N         #@threads
+    @time @threads for ii = keep_list
         i = good_list[ii]
         id = threadid()
         htempX = 0.0 #for some reason the variable name h was causing problems with threads
@@ -1190,7 +1258,13 @@ function make_ham_main(locs_i_up_ID,locs_j_up_ID,locs_i_dn_ID,locs_j_dn_ID,locs_
         basis_tmp  = @view basis_tmp_threads[:,id]
         basis_tmp2 = @view basis_tmp_threads2[:,id]
 
-        for jj = 1:length(good_list) #1:N
+        for jj = keep_list
+
+            if jj < ii
+                continue
+            end
+            
+            #for jj = ii:length(good_list) #1:N
             j = good_list[jj]
 
             if true
@@ -1299,6 +1373,12 @@ function make_ham_main(locs_i_up_ID,locs_j_up_ID,locs_i_dn_ID,locs_j_dn_ID,locs_
                 push!(ArrI_threads[id], ii)
                 push!(ArrJ_threads[id], jj)
                 push!(ArrH_threads[id], htempX * signX )#* sign)#*sign)
+
+                if ii != jj
+                    push!(ArrI_threads[id], jj)
+                    push!(ArrJ_threads[id], ii)
+                    push!(ArrH_threads[id], htempX * signX )#* sign)#*sign)
+                end                    
                 #                if !( h ≈ Float64(i+j))
                 #                    println("h $h $(i+j)")
                 #                end
@@ -1312,6 +1392,8 @@ function make_ham_main(locs_i_up_ID,locs_j_up_ID,locs_i_dn_ID,locs_j_dn_ID,locs_
         
     end
 
+
+    
     return ArrI_threads, ArrJ_threads, ArrH_threads, count_up_MAT, count_dn_MAT
 
     
@@ -1319,7 +1401,7 @@ end
 
 
 
-function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_dict, VH, RR, H_2bdy, gamma_up, gamma_dn; dense=false, symmetry=false, Z0=1.0)
+function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_dict, VH, RR, H_2bdy, gamma_up, gamma_dn; dense=false, symmetry=false, Z0=1.0, special_up=Int64[], special_dn=Int64[])
 
 
 
@@ -1331,7 +1413,7 @@ function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_d
     #ArrH = Float64[]
 
 
-
+    
     
     #    sign = 1.0
     #    h = 0.0
@@ -1408,122 +1490,122 @@ function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_d
             end
         end
     end
-#    if length(good_list) < 10
-#        println("symmetry $symmetry ", good_list, " !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-#    else
- #       println("symmetry $symmetry keep ", length(good_list), " !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-#    end        
+    if length(good_list) < 10
+        println("symmetry $symmetry ", good_list, " !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+    else
+        println("symmetry $symmetry keep ", length(good_list), " !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+    end        
 
     #@THREADS
 
 #    println("main part")
-    @time ArrI_threads, ArrJ_threads, ArrH_threads,count_up_MAT, count_dn_MAT = make_ham_main(locs_i_up_ID,locs_j_up_ID,locs_i_dn_ID,locs_j_dn_ID,locs_up_threads,locs_dn_threads,basis_tmp_threads,basis_tmp_threads2,good_list,W, W_dn, basis_up, basis_dn, dat, s_up, s_dn, basis_dict, VH, RR, H_2bdy,Z0,gamma_up, gamma_dn)
+    @time ArrI_threads, ArrJ_threads, ArrH_threads,count_up_MAT, count_dn_MAT = make_ham_main(locs_i_up_ID,locs_j_up_ID,locs_i_dn_ID,locs_j_dn_ID,locs_up_threads,locs_dn_threads,basis_tmp_threads,basis_tmp_threads2,good_list,W, W_dn, basis_up, basis_dn, dat, s_up, s_dn, basis_dict, VH, RR, H_2bdy,Z0,gamma_up, gamma_dn, special_up, special_dn)
 
     if false
-    ArrI_threads = []
-    ArrJ_threads = []
-    ArrH_threads = []
+        ArrI_threads = []
+        ArrJ_threads = []
+        ArrH_threads = []
 
-    for n = 1:nthreads()
-        push!(ArrI_threads, Int64[])
-        push!(ArrJ_threads, Int64[])
-        push!(ArrH_threads, Float64[])
-    end
-
-    println("main part")
-
-
-    
-#    locs_i = zeros(Int64, 2)
-#    locs_j = zeros(Int64, 2)
-    @time for ii = 1:length(good_list) #1:N         #@threads
-        i = good_list[ii]
-        id = threadid()
-        htempX = 0.0 #for some reason the variable name h was causing problems with threads
-        signX = 1.0
-        locs_i_up =  @view locs_i_up_ID[:,id]
-        locs_j_up =  @view locs_j_up_ID[:,id]
-        locs_i_dn =  @view locs_i_dn_ID[:,id]
-        locs_j_dn =  @view locs_j_dn_ID[:,id]
-        locs_up =    @view locs_up_threads[:,id]
-        locs_dn =    @view locs_dn_threads[:,id]
-        basis_tmp  = @view basis_tmp_threads[:,id]
-        basis_tmp2 = @view basis_tmp_threads2[:,id]
-
-        for jj = 1:length(good_list) #1:N
-            j = good_list[jj]
-
-            if true
-
-                count_up = find_diff_fast2(basis_up, i, j, basis_tmp2, locs_up, W, locs_i_up, locs_j_up)
-                count_dn = find_diff_fast2(basis_dn, i, j, basis_tmp2, locs_dn, W_dn, locs_i_dn, locs_j_dn)
-
-                signX = 1
-                
-                htempX = 0.0
-                signX = 1
-                
-               if count_up == 0 && count_dn == 0
-                    htempX = matrix_el_0_precalc(dat, s_up, s_dn, (@view basis_up[i,:]), (@view basis_dn[i,:]), basis_dict, VH, RR, H_2bdy, Z0)
-#                    htempX = 0.1
-                   
-                    
-                elseif count_up == 2 && count_dn == 0
-
-                    htempX = matrix_el_1_samespin_precalc(dat, s_up, (@view basis_up[i,:]), s_dn, (@view basis_dn[i,:]), locs_up, basis_dict, VH, RR, H_2bdy, Z0=Z0)
-                    signX = gamma_up[i,locs_i_up[1]]*gamma_up[j,locs_j_up[1]]
-
-                elseif count_up == 0 && count_dn == 2
-                    htempX = matrix_el_1_samespin_precalc(dat, s_dn, (@view basis_dn[i,:]), s_up, (@view basis_up[i,:]), locs_dn, basis_dict, VH, RR, H_2bdy, Z0=Z0)
-                   signX = gamma_dn[i,locs_i_dn[1]]*gamma_dn[j,locs_j_dn[1]]
-
-                    #                    
-                elseif count_up == 2 && count_dn == 2
-
-                    htempX = matrix_el_2_diffspin_precalc(dat, s_up, s_dn, locs_up, locs_dn, basis_dict, VH, RR)
-#                    println("$ii $jj $htempX")
-                    signX =         (gamma_up[i,locs_up[1]]*basis_up[i,locs_up[1]] + gamma_up[i,locs_up[2]]*basis_up[i,locs_up[2]])
-                    signX = signX * (gamma_up[j,locs_up[1]]*basis_up[j,locs_up[1]] + gamma_up[j,locs_up[2]]*basis_up[j,locs_up[2]])
-                   signX = signX * (gamma_dn[i,locs_dn[1]]*basis_dn[i,locs_dn[1]] + gamma_dn[i,locs_dn[2]]*basis_dn[i,locs_dn[2]])
-                    signX = signX * (gamma_dn[j,locs_dn[1]]*basis_dn[j,locs_dn[1]] + gamma_dn[j,locs_dn[2]]*basis_dn[j,locs_dn[2]])
-
-                elseif count_up == 4 && count_dn == 0
-                    htempX = matrix_el_2_samespin_precalc(dat, s_up, locs_i_up, locs_j_up, basis_dict, VH, RR)
-                    signX =  gamma_up[i,locs_i_up[1]]*gamma_up[i,locs_i_up[2]]*gamma_up[j,locs_j_up[1]]*gamma_up[j,locs_j_up[2]]
-                elseif count_up == 0 && count_dn == 4
-                    htempX = matrix_el_2_samespin_precalc(dat, s_dn, locs_i_dn, locs_j_dn, basis_dict, VH, RR)
-                    signX =  gamma_dn[i,locs_i_dn[1]]*gamma_dn[i,locs_i_dn[2]]*gamma_dn[j,locs_j_dn[1]]*gamma_dn[j,locs_j_dn[2]]
-                end
-                #h = i + j
-
-                #if false
-            end
-            #println(["h ", i, basis_up[i,:], basis_up[j,:], j, basis_dn[i,:], basis_dn[j,:], count_up, count_dn], "   sign $sign  ", locs_up, locs_dn)
-
-            if abs(htempX) > 1e-10
-                #                if (i == 2 || i == 6 ) && j == 25
-                #                    println("add IJ $i $j $h $sign")
-                #                end
-
-                #                push!(ArrI, i)
-                #                push!(ArrJ, j)
-                #                push!(ArrH, h*sign)
-
-                push!(ArrI_threads[id], ii)
-                push!(ArrJ_threads[id], jj)
-                push!(ArrH_threads[id], htempX * signX )#* sign)#*sign)
-                #                if !( h ≈ Float64(i+j))
-                #                    println("h $h $(i+j)")
-                #                end
-                #println(h - (i+j))
-
-                
-            end
-
+        for n = 1:nthreads()
+            push!(ArrI_threads, Int64[])
+            push!(ArrJ_threads, Int64[])
+            push!(ArrH_threads, Float64[])
         end
-        #        println()
+
+        println("main part")
+
+
         
-    end
+        #    locs_i = zeros(Int64, 2)
+        #    locs_j = zeros(Int64, 2)
+        @time for ii = 1:length(good_list) #1:N         #@threads
+            i = good_list[ii]
+            id = threadid()
+            htempX = 0.0 #for some reason the variable name h was causing problems with threads
+            signX = 1.0
+            locs_i_up =  @view locs_i_up_ID[:,id]
+            locs_j_up =  @view locs_j_up_ID[:,id]
+            locs_i_dn =  @view locs_i_dn_ID[:,id]
+            locs_j_dn =  @view locs_j_dn_ID[:,id]
+            locs_up =    @view locs_up_threads[:,id]
+            locs_dn =    @view locs_dn_threads[:,id]
+            basis_tmp  = @view basis_tmp_threads[:,id]
+            basis_tmp2 = @view basis_tmp_threads2[:,id]
+
+            for jj = 1:length(good_list) #1:N
+                j = good_list[jj]
+
+                if true
+
+                    count_up = find_diff_fast2(basis_up, i, j, basis_tmp2, locs_up, W, locs_i_up, locs_j_up)
+                    count_dn = find_diff_fast2(basis_dn, i, j, basis_tmp2, locs_dn, W_dn, locs_i_dn, locs_j_dn)
+
+                    signX = 1
+                    
+                    htempX = 0.0
+                    signX = 1
+                    
+                    if count_up == 0 && count_dn == 0
+                        htempX = matrix_el_0_precalc(dat, s_up, s_dn, (@view basis_up[i,:]), (@view basis_dn[i,:]), basis_dict, VH, RR, H_2bdy, Z0)
+                        #                    htempX = 0.1
+                        
+                        
+                    elseif count_up == 2 && count_dn == 0
+
+                        htempX = matrix_el_1_samespin_precalc(dat, s_up, (@view basis_up[i,:]), s_dn, (@view basis_dn[i,:]), locs_up, basis_dict, VH, RR, H_2bdy, Z0=Z0)
+                        signX = gamma_up[i,locs_i_up[1]]*gamma_up[j,locs_j_up[1]]
+
+                    elseif count_up == 0 && count_dn == 2
+                        htempX = matrix_el_1_samespin_precalc(dat, s_dn, (@view basis_dn[i,:]), s_up, (@view basis_up[i,:]), locs_dn, basis_dict, VH, RR, H_2bdy, Z0=Z0)
+                        signX = gamma_dn[i,locs_i_dn[1]]*gamma_dn[j,locs_j_dn[1]]
+
+                        #                    
+                    elseif count_up == 2 && count_dn == 2
+
+                        htempX = matrix_el_2_diffspin_precalc(dat, s_up, s_dn, locs_up, locs_dn, basis_dict, VH, RR)
+                        #                    println("$ii $jj $htempX")
+                        signX =         (gamma_up[i,locs_up[1]]*basis_up[i,locs_up[1]] + gamma_up[i,locs_up[2]]*basis_up[i,locs_up[2]])
+                        signX = signX * (gamma_up[j,locs_up[1]]*basis_up[j,locs_up[1]] + gamma_up[j,locs_up[2]]*basis_up[j,locs_up[2]])
+                        signX = signX * (gamma_dn[i,locs_dn[1]]*basis_dn[i,locs_dn[1]] + gamma_dn[i,locs_dn[2]]*basis_dn[i,locs_dn[2]])
+                        signX = signX * (gamma_dn[j,locs_dn[1]]*basis_dn[j,locs_dn[1]] + gamma_dn[j,locs_dn[2]]*basis_dn[j,locs_dn[2]])
+
+                    elseif count_up == 4 && count_dn == 0
+                        htempX = matrix_el_2_samespin_precalc(dat, s_up, locs_i_up, locs_j_up, basis_dict, VH, RR)
+                        signX =  gamma_up[i,locs_i_up[1]]*gamma_up[i,locs_i_up[2]]*gamma_up[j,locs_j_up[1]]*gamma_up[j,locs_j_up[2]]
+                    elseif count_up == 0 && count_dn == 4
+                        htempX = matrix_el_2_samespin_precalc(dat, s_dn, locs_i_dn, locs_j_dn, basis_dict, VH, RR)
+                        signX =  gamma_dn[i,locs_i_dn[1]]*gamma_dn[i,locs_i_dn[2]]*gamma_dn[j,locs_j_dn[1]]*gamma_dn[j,locs_j_dn[2]]
+                    end
+                    #h = i + j
+
+                    #if false
+                end
+                #println(["h ", i, basis_up[i,:], basis_up[j,:], j, basis_dn[i,:], basis_dn[j,:], count_up, count_dn], "   sign $sign  ", locs_up, locs_dn)
+
+                if abs(htempX) > 1e-10
+                    #                if (i == 2 || i == 6 ) && j == 25
+                    #                    println("add IJ $i $j $h $sign")
+                    #                end
+
+                    #                push!(ArrI, i)
+                    #                push!(ArrJ, j)
+                    #                push!(ArrH, h*sign)
+
+                    push!(ArrI_threads[id], ii)
+                    push!(ArrJ_threads[id], jj)
+                    push!(ArrH_threads[id], htempX * signX )#* sign)#*sign)
+                    #                if !( h ≈ Float64(i+j))
+                    #                    println("h $h $(i+j)")
+                    #                end
+                    #println(h - (i+j))
+
+                    
+                end
+
+            end
+            #        println()
+            
+        end
     end
     println("end main part")
     
@@ -1557,14 +1639,6 @@ function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_d
     #        println("test $h    $i $j")
     #    end
 
-    println("sparse   ", sum(abs.(ArrH)), " !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-    @time H = sparse(ArrI, ArrJ, ArrH)
-    #    println(["IJ ",H[2,25], H[6,25]])
-    #    println(["IJ ",H[25,2], H[25,6]])
-    H = 0.5*(H + H')
-    if dense
-        H = collect(H)
-    end
 
 #    H_dict =Dict()
 #
@@ -1587,7 +1661,7 @@ function make_ham_precalc(dat, s_up, s_dn, nup, ndn, basis_up, basis_dn, basis_d
 #    end
             
             
-    return     ArrI, ArrJ, ArrH, H, good_list,count_up_MAT, count_dn_MAT
+    return     ArrI, ArrJ, ArrH, good_list,count_up_MAT, count_dn_MAT
 
 end
 
@@ -2139,6 +2213,8 @@ function get_denmat2(vects, H, basis_up, basis_dn, s_up, s_dn, dat, good_list, g
 #    println("size s_up $(size(s_up)) s_dn $(size(s_dn))")
     
     D = zeros(nmax, nmax, 2, lmax+1, lmax*2+1)
+
+    println("size D ", size(D))
     
     basis_tmp = zeros(Int64, Norb)
     locs_i_up = zeros(Int64,2)
@@ -2789,18 +2865,19 @@ function truncate_denmat2(denmat, dat, nmax, s_up, s_dn; thr=1e-8)
     for spin = [1,2]
         for l = 0:lmax
             for m = -l:l
-                valsX, vectsX = eigen(Hermitian( denmat[1:nmax[l+1],1:nmax[l+1],spin,l+1,l+m+1]))
+                valsX, vectsX = eigen(Hermitian( denmat[1:min(nmax[l+1], size(denmat)[1]),1:min(nmax[l+1], size(denmat)[1]),spin,l+1,l+m+1]))
             
 #                println("check XXXX $spin $l $m   ",  tr(vectsX * vectsX'))
                 #        p
 #                println("valsX ", valsX)
                 c = 0
-                for n = (nmax[l+1]):-1:1
+                for n = (min(nmax[l+1], size(denmat)[1])):-1:1
                     if valsX[n] > thr
                         c += 1
-                        for norb = 1:nmax[l+1]
+                        for norb = 1:min(nmax[l+1], size(denmat)[1])
                             VECTS_new[:,c,spin, l+1, l+m+1] += vectsX[norb,n] * dat.VECTS_small[:,norb,spin,l+1,l+m+1]
                         end
+#                        println("keep c $c l $l m $m spin $spin")
                     else
                         break
                     end
@@ -2810,7 +2887,9 @@ function truncate_denmat2(denmat, dat, nmax, s_up, s_dn; thr=1e-8)
 #                println("check FFFF $spin $l $m  c $c ",  tr(dat.VECTS_small[:,1:c,spin,l+1,l+m+1] * dat.VECTS_small[:,1:c,spin,l+1,l+m+1]'))
                 
                 nkeep[l+1] = max(nkeep[l+1],c)
-#                println("nkeep $l ", nkeep[l+1])
+                #                println("nkeep $l ", nkeep[l+1])
+#                println("extra $(nmax[l+1]+1 ) $(N-1)")
+#                println()
                 extra = (nmax[l+1]+1):(N-1)
 
 #                println("[$spin $l $m ] c $c  , extra $extra, nkeep $nkeep nmax+1 $(nmax[l+1]+1)")
@@ -2862,9 +2941,12 @@ function cleardict()
 end
 
 
+
+
 function run_CI(dat, nexcite; energy_max = 1000000000000.0, nmax = 1000000, dense=false, symmetry=false, Z0=1.0, thr = 1e-10)
 
-    cleardict()
+    println("clear")
+    @time cleardict()
     
     if typeof(nmax) == Int64
         nmax = nmax * ones(Int64, dat.lmax+1)
@@ -2875,11 +2957,18 @@ function run_CI(dat, nexcite; energy_max = 1000000000000.0, nmax = 1000000, dens
 
     println("construct ham")
     @time ham =  construct_ham(dat, nexcite; energy_max = energy_max, nmax = nmax, dense=dense, symmetry=symmetry, Z0=Z0)
+    ArrI, ArrJ, ArrH, basis_up, basis_dn, s_up, s_dn, good_list, gamma_up, gamma_dn,count_up_MAT, count_dn_MAT = ham
+    println("sparse")
+    @time H = sparse(ArrI, ArrJ, ArrH)
+    H = 0.5*(H + H')
+    if dense
+        H = collect(H)
+    end
+    
     println("done construct ham")
     if isnothing(ham)
         return nothing
     end
-    ArrI, ArrJ, ArrH, H, basis_up, basis_dn, s_up, s_dn, good_list, gamma_up, gamma_dn,count_up_MAT, count_dn_MAT = ham
     println("eigs")
     @time if size(H)[1] < 100 || dense
 
@@ -2931,6 +3020,29 @@ function run_CI(dat, nexcite; energy_max = 1000000000000.0, nmax = 1000000, dens
 end
     
 
+function run_CI_minimize(dat, nexcite, new_orbital_l, energy_max = 1000000000000.0, nmax = 1000000, dense=false, symmetry=false, Z0=1.0, thr = 1e-10, niters=8, addnum=10, lmax = 100, itertol = 1e-5)
+
+
+    if typeof(nmax) == Int64
+        nmax = nmax * ones(Int64, dat.lmax+1)
+        for n in 0:dat.lmax
+            nmax[n+1] = nmax[n+1] - 1
+        end
+    end
+    lmax = min(lmax, dat.lmax)
+
+    #initial CI
+    @time ham =  construct_ham(dat, nexcite; energy_max = energy_max, nmax = nmax, dense=dense, symmetry=symmetry, Z0=Z0)
+    ArrI, ArrJ, ArrH, basis_up, basis_dn, s_up, s_dn, good_list, gamma_up, gamma_dn,count_up_MAT, count_dn_MAT = ham
+
+    new_orbital_n = nexcite[new_orbital_l] + 1
+    
+    
+    
+    
+end
+
+
 function run_CI_iterate(dat, nexcite; energy_max = 1000000000000.0, nmax = 1000000, dense=false, symmetry=false, Z0=1.0, thr = 1e-10, niters=8, addnum=10, lmax = 100, itertol = 1e-5)
 
     if typeof(nmax) == Int64
@@ -2946,8 +3058,9 @@ function run_CI_iterate(dat, nexcite; energy_max = 1000000000000.0, nmax = 10000
     nkeep = missing
     vals = missing
     H = zeros(1,1)
-    for l = 0:min(dat.lmax, lmax)
-
+    lmax = min(lmax, dat.lmax)
+    #    for l = 0:min(dat.lmax, lmax)
+l = 99
         Eold = 1000000.0
         for iter = 0:niters
 
@@ -2961,11 +3074,11 @@ function run_CI_iterate(dat, nexcite; energy_max = 1000000000000.0, nmax = 10000
                     dat_temp.VECTS_small[:,:,:,:,:] .= VECTS_new[:,:,:,:,:]
 #                    println("nmax old $nmax  nkeep new $nkeep")
                     nmax = deepcopy(nkeep)
-                    nmax[l+1] += addnum
+#                    nmax[l+1] += addnum
 
-                    #for n = 0:(lmax)
-                    #    nmax[n+1] += addnum
-                    #end
+                    for n = 0:(lmax)
+                        nmax[n+1] += addnum
+                    end
 
                 end
 #                println("test sym denmat ", sum(abs.(denmat[:,:,1,1,1] - denmat[:,:,1,1,1]')))
@@ -2983,12 +3096,13 @@ function run_CI_iterate(dat, nexcite; energy_max = 1000000000000.0, nmax = 10000
 #                if dense
 #                    println("ITER $iter l=$l  nkeep $nkeep  nmax_new $nmax  energy $(vals[1])    $(vals[1] - dat.etot)                                              $(cond(collect(H)))  ")
                     #                else
-
-                    if iter == 0
-                        println("ITER $iter l=$l  nkeep $nkeep  nmax_new $nmax  energy $(vals[1])    $(vals[1] - dat.etot)  ")
-                    else
-                        println("ITER $iter l=$l  nkeep $nkeep  nmax_new $nmax  energy $(vals[1])    $(vals[1] - dat.etot)  $(Eold - vals[1])  ")                        
-                    end
+                
+                if iter == 0
+                    println("ITER $iter l=$l  nkeep $nkeep  nmax_new $nmax  energy $(vals[1])    $(vals[1] - dat.etot)  ")
+                else
+                    println("ITER $iter l=$l  nkeep $nkeep  nmax_new $nmax  energy $(vals[1])    $(vals[1] - dat.etot)  $(Eold - vals[1])  ")                        
+                end
+                println("size denmat ", size(denmat))
 #                end
                 #println("ITER $iter nkeep $nkeep  nmax $nmax  energy $(vals[1])    $(vals[1] - dat.etot)")
                 push!(energies, vals[1])
@@ -3006,7 +3120,7 @@ function run_CI_iterate(dat, nexcite; energy_max = 1000000000000.0, nmax = 10000
                 #                break
 #            end
         end
-    end
+#    end
 
     return dat_temp, energies, denmat
     
