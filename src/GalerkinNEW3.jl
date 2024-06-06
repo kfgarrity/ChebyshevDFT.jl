@@ -448,13 +448,14 @@ function get_gal_rep_matrix(fn, g::gal; M = -1, N = -1)
 
 end
 
+
 function get_gal_rep_matrix(arr::Vector, g::gal; M = -1)
 
     if M == -1
         M = g.M
     end
     N = length(arr)+1
-    println("N $N")
+#    println("N $N")
     INT = zeros(N-1, N-1)
 
 
@@ -468,11 +469,31 @@ function get_gal_rep_matrix(arr::Vector, g::gal; M = -1)
     #println("get_gal_rep_matrix loop arr")
     @inbounds @threads for n1 = 1:(N-1)
         for n2 = n1:(N-1)
-            INT[n1, n2] = sum(  (@view g.bvals[2:M+2,n1,M]).*(@view g.bvals[2:M+2,2,M]) .* arr_m)
+            INT[n1, n2] = sum(  (@view g.bvals[2:M+2,n1,M]).*(@view g.bvals[2:M+2,n2,M]) .* arr_m)
         end
     end
     
     return (INT+INT') - diagm(diag(INT))
+
+    
+    
+end
+
+function get_gal_rep_matrix_matrix(g::gal, N, M)
+
+    INT = zeros(N-1, N-1, N-1)
+
+
+    #println("get_gal_rep_matrix loop arr")
+    for n1 = 1:(N-1)
+        for n2 = 1:(N-1)
+            for n3 = 1:(N-1)
+                @views INT[n1, n2, n3] = sum(  ( g.bvals[2:M+2,n1,M]).*(g.bvals[2:M+2,n2,M]) .* g.bvals[2:M+2,n3,M] .* g.w[2:M+2,M])
+            end
+        end
+    end
+    
+    return INT
 
     
     
