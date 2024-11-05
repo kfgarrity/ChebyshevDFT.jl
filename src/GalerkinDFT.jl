@@ -105,6 +105,7 @@ struct scf_data
     hf_sym_big::Array{Float64,9}
     orthogonalize::Bool
     SVECTS_small::Array{Float64,5}
+    nmax::Int64
 end
 
 Base.show(io::IO, d::scf_data) = begin
@@ -247,7 +248,8 @@ function make_scf_data(    g::gal,
                            e_nuc::Float64,
                            hf_sym,
                            hf_sym_big,
-                           orthogonalize::Bool)
+                           orthogonalize::Bool,
+                           nmax::Int64)
 
 
     if orthogonalize
@@ -311,7 +313,8 @@ function make_scf_data(    g::gal,
                         hf_sym,
                         hf_sym_big,
                         orthogonalize,
-                        SVECTS_small)
+                        SVECTS_small,
+                        nmax)
 
 
 end
@@ -4269,7 +4272,8 @@ function dft(; fill_str = missing, g = missing, N = -1, M = -1, Z = 1.0, niters 
                            e_nuc,
                            hf_sym,
                            hf_sym_big,
-                           orthogonalize)
+                           orthogonalize,
+                           nmax)
     
     return dat
     

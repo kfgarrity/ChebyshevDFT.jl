@@ -1,6 +1,6 @@
 # https://www.nature.com/articles/s41467-019-12467-0
 
-module GInverse
+module GalerkinInverse
 
 using ..GalerkinDFT:prepare
 using ..GalerkinDFT:get_rho
@@ -9,8 +9,77 @@ using ..Galerkin:get_gal_rep_matrix_matrix
 using LinearAlgebra
 using Optim
 
+
+function apply_mat(vec, X, MAT_VKS)
+    for i = 1:N-1
+        for j = 1:N-1
+            X[i,j] = sum(MAT_VKS[i,j,:] .* vec)
+        end
+    end
+end
+
+
+function get_inverse(dat, cval = 1e5, regularization = 1e3)
+
+    N = dat.N
+    M = dat.M
+
+    rho_R2, rho_dR, rho_rs_M, drho_rs_M_LM, MP = get_rho(dat.VALS, dat.VECTS, dat.nel, dat.filling, dat.nspin, dat.lmax, dat.lmaxrho, N, M, dat.invS, dat.gal, true, dat.exx, dat.nmax, dat.S5, false)
+    rho_target = zeros(size(rho_rs_M))
+    for spin = 1:nspin
+        for l = 0:dat.lmaxrho
+            for m = -l:l
+                rho_target[:,spin, l+1, l+m+1] = (rho_rs_M[:,spin,l+1,l+m+1]  .* dat.R.^2 )
+            end
+        end
+    end
+
+                
+    MAT_VKS = get_gal_rep_matrix_matrix( GAL, N,  M);
+    V_KS = zeros(N-1, N-1)
+    v_ks = zeros(N-1, dat.nspin, dat.lmax+1, 2*dat.lmax+1)
+    rho_temp = zeros(size(rho_rs_M))
+    #function we want to minimize. takes in Galerkin N representation of potential as vector.
+    function f(v_ks_vec)
+
+        #reshape v_ks
+        v_ks .= reshape(v_ks_vec, size(rho_target))
+
+        VALS, VECTS_new = solve_small(dat.V_C, dat.V_L, dat.VH_LM, v_ks, missing, dat.D2, dat.S, dat.nspin, datl.lmax, dat.lmaxrho, missing, dat.VECTS_small,dat.VALS, 0.0)
+
+        rho_R2, rho_dR, rho_rs_M, drho_rs_M_LM, MP = get_rho(dat.VALS, dat.VECTS, dat.nel, dat.filling, dat.nspin, dat.lmax, dat.lmaxrho, N, M, dat.invS, dat.gal, true, dat.exx, dat.nmax, dat.S5, false)
+        
+        rho_temp .= 0.0
+        for spin = 1:nspin
+            for l = 0:dat.lmaxrho
+                for m = -l:l
+                    rho_temp[:,spin, l+1, l+m+1] = (rho_rs_M[:,spin,l+1,l+m+1]  .* dat.R.^2 )
+                end
+            end
+        end
+
+        retX = cval*sum((rho_temp - rho_target).^2) #charge term 
+
+        retX += regularization * sum(v_ks_vec.^2) #regularization term
+
+        return retX
+        
+    end
+
+    opts = Optim.Options( f_tol = 1e-9, g_tol = 1e-9, iterations = 5000, store_trace = true, show_trace = false)
+
+
+    v_ks_start = zeros(N-1, dat.nspin, dat.lmax+1, 2*dat.lmax+1)
+    
+    ret = optimize(f,  v_ks_start, opts)
+
+    
+end
+
+
 function GalerkinInverseTest(GAL, fill_str)
 
+    
     Z = 1.0
     lmax = 0
     exc = :hydrogen
@@ -46,10 +115,11 @@ function GalerkinInverseTest(GAL, fill_str)
 
     rho_target = (rho_rs_M .* R.^2 )[:]
 
-    t = (mat_n2m * vects[:,1])
-    rho_target2 = t.^2 / (GAL.b-GAL.a) * 2
+    #t = (mat_n2m * vects[:,1]) .^2 + (mat_n2m * vects[:,2]) .^2
+    t = (mat_n2m * vects[:,1]) .^2 + (mat_n2m * vects[:,2] ).^2
+    rho_target2 = 2* t / (GAL.b-GAL.a) * 2
 
-#    println("rho ", rho_target2./rho_target)
+    println("rho ", rho_target2./rho_target)
 #    return
     
     #start search
@@ -86,7 +156,11 @@ function GalerkinInverseTest(GAL, fill_str)
         apply_mat(v_ks, V_KS)
         vals, vects = eigen(Hermitian(D2 + V_C + V_KS),Hermitian( S))
         VECTS[:,1,1,1,1] = vects[:,1]
-        rho = (mat_n2m * vects[:,1]).^2 / (GAL.b-GAL.a) * 2
+
+        t = (mat_n2m * vects[:,1]) .^2 + (mat_n2m * vects[:,2] ).^2
+        rho = 2* t / (GAL.b-GAL.a) * 2
+
+        #        rho = (mat_n2m * vects[:,1]).^2 / (GAL.b-GAL.a) * 2
         retX = cval*sum((rho - rho_target).^2)
         retX += regularization * sum(v_ks.^2)
         return retX
@@ -111,15 +185,14 @@ function GalerkinInverseTest(GAL, fill_str)
         #V_KS = diagm(v_ks)
         vals, vects = eigen(Hermitian(D2 + V_C + V_KS),Hermitian( S))
         #        rho = vects[:,1].^2
-        MAT .= 0.0
-        MAT[1:N-1, 1:N-1] = D2 + V_C + V_KS - I(N-1) * vals[i]
-        MAT[1:N-1,N] = 2 * vects[:,i]
-        MAT[N, 1:N-1] = 2 *  vects[:,i]'
 
-        G .= 0.0
 #        G[1:N-1] = 4 * (rho_target - rho) .* vects[:,i] 
 
-        rho = (mat_n2m * vects[:,1]).^2 / (GAL.b-GAL.a) * 2
+
+        t = (mat_n2m * vects[:,1]) .^2 + (mat_n2m * vects[:,2] ).^2
+        rho = 2* t / (GAL.b-GAL.a) * 2
+        
+#        rho = (mat_n2m * vects[:,1]).^2 / (GAL.b-GAL.a) * 2
 
 #        println("size rho ", size(rho))
 #        println("size rho_target ", size(rho_target))
@@ -129,8 +202,17 @@ function GalerkinInverseTest(GAL, fill_str)
 #        println("size (rho_target - rho)  .* (mat_n2m * vects[:,1]) ", size((rho_target - rho)  .* (mat_n2m * vects[:,1])))
 #        println("size mat_m2n * ((rho_target - rho)  .* (mat_n2m * vects[:,1])) ", size(mat_m2n*((rho_target - rho)  .* (mat_n2m * vects[:,1]))))
 
+        G .= 0.0
+        grad .= 0.0
+        for i = 1:2
         
-        G[1:N-1] = mat_n2m'* (4 * (rho_target - rho)  .* (mat_n2m * vects[:,1]) / (GAL.b-GAL.a) * 2)
+            MAT .= 0.0
+            MAT[1:N-1, 1:N-1] = D2 + V_C + V_KS - I(N-1) * vals[i]
+            MAT[1:N-1,N] = 2 * vects[:,i]
+            MAT[N, 1:N-1] = 2 *  vects[:,i]'
+        
+        
+            G[1:N-1] = 2 *  mat_n2m'* (4 * (rho_target - rho)  .* (mat_n2m * vects[:,i]) / (GAL.b-GAL.a) * 2)
 
 #        println("MAT")
 #        println(MAT)
@@ -138,13 +220,14 @@ function GalerkinInverseTest(GAL, fill_str)
 #        println("G")
 #        println(G)
 
-        apply_mat(vects[:,i], X)
+            apply_mat(vects[:,i], X)
         
-        grad .= X*(cval*(MAT\G)[1:N-1])
+            grad .+= X*(cval*(MAT\G)[1:N-1])
 
         #println("size grad ", size(grad), " size v_ks ", size(v_ks))
+        end
         grad .+=  2 * regularization * v_ks
-
+        
         #        grad .= 1000*(MAT\G)[1:N-1] * vects[:,i]
 #        println()
 #        println("grad")
