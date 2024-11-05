@@ -1,6 +1,6 @@
 module Hartree
 using LinearAlgebra
-using ChebyshevQuantum
+#using ChebyshevQuantum
 using QuadGK
 
 function V_H(N, n, Rmax)

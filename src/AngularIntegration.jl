@@ -29,7 +29,7 @@ struct leb
     ddYlm_phi::Dict{NTuple{2,Int64}, Vector{Float64}}
 
     dYlm_phi_sin::Dict{NTuple{2,Int64}, Vector{Float64}}
-    
+    Ylm_arr::Array{Float64,3}
 end
 
 Base.show(io::IO, l::leb) = begin
@@ -73,8 +73,10 @@ function makeleb(n; lmax = 12 )
         ddYlm_phi[(0,0)] = [0.0]
 
         dYlm_phi_sin[(0,0)] = [0.0]
+
+        Ylm_arr = ones(1,1,1) * 1/sqrt(4*pi)
         
-        return leb(1,1,x,y,z,θ,ϕ,w, 0, Ylm, dYlm_theta, dYlm_phi, ddYlm_theta, ddYlm_phi, dYlm_phi_sin )
+        return leb(1,1,x,y,z,θ,ϕ,w, 0, Ylm, dYlm_theta, dYlm_phi, ddYlm_theta, ddYlm_phi, dYlm_phi_sin, Ylm_arr )
         
     end
 
@@ -201,6 +203,9 @@ function makeleb(n; lmax = 12 )
     ddYlm_phi = Dict{NTuple{2,Int64}, Vector{Float64}}()
 
     counter = 0
+
+    Ylm_arr = zeros(lmax+1,2*lmax+1,N)
+
     for l1 = 0:lmax
         for m1 = -l1:l1
             counter += 1
@@ -216,7 +221,7 @@ function makeleb(n; lmax = 12 )
             dYlm_phi_sin[(l1,m1)] = zeros(N)           
             for nn = 1:N
                 Ylm[(l1,m1)][nn] = data[nn][(l1,m1)]
-
+                Ylm_arr[l1+1,l1+m1+1,nn] = data[nn][(l1,m1)]
                 
                 dYlm_theta[(l1,m1)][nn] = DT[nn][counter]
                 ddYlm_theta[(l1,m1)][nn] = DDT[nn][counter]
@@ -243,7 +248,7 @@ function makeleb(n; lmax = 12 )
 #        println("$c typeof ", typeof(x))
 #    end
     
-    return leb(n,N,x,y,z,θ,ϕ,w,lmax,Ylm,dYlm_theta, dYlm_phi,ddYlm_theta, ddYlm_phi, dYlm_phi_sin)
+    return leb(n,N,x,y,z,θ,ϕ,w,lmax,Ylm,dYlm_theta, dYlm_phi,ddYlm_theta, ddYlm_phi, dYlm_phi_sin, Ylm_arr)
 
 end
 

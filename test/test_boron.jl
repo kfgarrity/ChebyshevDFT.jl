@@ -14,7 +14,8 @@ g20_m2_100 = ChebyshevDFT.Galerkin.makegal(100,0.0,20.0; α=-2.0, M = 250);
     @suppress begin
         ret1 = ChebyshevDFT.GalerkinDFT.dft(; fill_str = "Be; 2 1 0 1.0 0.0", g = g20_m2_100,N = N, M = M,  Z = 5.0, niters = 100, mix = 0.8, exc=:vwn, lmax = 2, conv_thr = 1e-7, lmaxrho = 6, mix_lm = true);
     end
-    @test sum(abs.(b_lda -     [ret1[1][1,1, 1,1],ret1[1][2,1, 1,1], ret1[1][1,1, 2,2], ret1[1][1,1, 2,1], ret1[1][1,2, 1,1],ret1[1][2,2, 1,1], ret1[1][1,2,2,1]]) .< tol_var) == 7
+    vals = ret1.VALS
+    @test sum(abs.(b_lda -     [vals[1,1, 1,1],vals[2,1, 1,1], vals[1,1, 2,2], vals[1,1, 2,1], vals[1,2, 1,1],vals[2,2, 1,1], vals[1,2,2,1]]) .< tol_var) == 7
 
 
 end
@@ -27,9 +28,9 @@ end
     @suppress begin
         ret1 = ChebyshevDFT.GalerkinDFT.dft(; fill_str = "Be; 2 1 0 1.0 0.0", g = g20_m2_100,N = N, M = M,  Z = 5.0, niters = 100, mix = 0.8, exc=:pbe, lmax = 2, conv_thr = 1e-7, lmaxrho = 8, mix_lm = true);
     end
-    
+    vals = ret1.VALS
 
-    @test sum(abs.(b_pbe -     [ret1[1][1,1, 1,1],ret1[1][2,1, 1,1], ret1[1][1,1, 2,2], ret1[1][1,1, 2,1], ret1[1][1,2, 1,1],ret1[1][2,2, 1,1], ret1[1][1,2,2,1]]) .< tol_var) == 7
+    @test sum(abs.(b_pbe -     [vals[1,1, 1,1],vals[2,1, 1,1], vals[1,1, 2,2], vals[1,1, 2,1], vals[1,2, 1,1],vals[2,2, 1,1], vals[1,2,2,1]]) .< tol_var) == 7
 
     
 end
@@ -51,9 +52,10 @@ end
     @suppress begin
         ret1 = ChebyshevDFT.GalerkinDFT.dft(; fill_str = "Be; 2 1 0 1.0 0.0", g = g20_m2_100,N = N, M = M,  Z = 5.0, niters = 100, mix = 0.8, exc=:none, lmax = 2, conv_thr = 1e-8, lmaxrho = 10, mix_lm = true, exx=1.0);
     end
+    vals = ret1.VALS
     
 
-    @test sum(abs.(b_hf -   [ret1[1][1,1, 1,1],ret1[1][2,1, 1,1], ret1[1][1,1, 2,2], ret1[1][1,2, 1,1], ret1[1][2,2, 1,1]]) .< tol_var) == 7
+    @test sum(abs.(b_hf -   [vals[1,1, 1,1],vals[2,1, 1,1], vals[1,1, 2,2], vals[1,2, 1,1], vals[2,2, 1,1]]) .< tol_var) == 5
 
               
 end

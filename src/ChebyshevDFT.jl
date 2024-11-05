@@ -2,7 +2,7 @@ module ChebyshevDFT
 
 greet() = print("Hello World!")
 
-using ChebyshevQuantum
+#using ChebyshevQuantum
 
 include("AngMom.jl")
 using ..AngMom:construct_real_gaunt_indirect
@@ -19,9 +19,9 @@ AngularIntegration.fill_gaunt()
 include("LDA.jl")
 include("UseLibxc.jl")
 
-include("Hartree.jl")
-include("SCF.jl")
-include("Inverse.jl")
+#include("Hartree.jl")
+#include("SCF.jl")
+#include("Inverse.jl")
 
 
 #include("Search.jl")
@@ -37,5 +37,7 @@ include("GalerkinDFT.jl")
 #include("GalerkinDFTX.jl")
 
 include("CI.jl")
+
+include("GalerkinInverse.jl")
 
 end # module
